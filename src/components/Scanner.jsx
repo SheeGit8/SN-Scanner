@@ -1,12 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BackIcon } from './Icons.jsx'
-import { loadPrefs, makeId, savePrefs, formatDay, formatTime } from '../storage.js'
+import {
+  Camera,
+  CameraOff,
+  Check,
+  CircleCheck,
+  History,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  ScanText,
+  TriangleAlert,
+} from 'lucide-react'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Field, Input } from './ui.jsx'
+import { PageHeader } from './Layout.jsx'
+import ScanForm from './ScanForm.jsx'
+import { makeId, savePrefs } from '../storage.js'
 import { createRepeatGate, extractField, extractSerial, getWorker, recognize } from '../ocr.js'
 import { eraseBoxes } from '../preprocess.js'
+import { useToast } from '../lib/toast.js'
+import { cn } from '../lib/utils.js'
 
 const canUseCamera = () => typeof window !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 
-// The on-screen frame covers this share of the viewfinder (keep in sync with .frame in App.css).
+// The on-screen frame covers this share of the viewfinder: keep in sync with the frame's
+// inset-x-[8%] inset-y-[32%] below, because it is also the OCR crop.
 const FRAME_W = 0.84
 const FRAME_H = 0.36
 const SCAN_INTERVAL_MS = 900
@@ -17,11 +34,13 @@ const STATUS_TEXT = {
   live: 'Point the frame at the S/N on the label',
   reading: 'Reading text…',
   paused: 'Serial number found',
-  unsupported: "The camera isn't available here. It needs HTTPS or localhost. Type the serial number below.",
-  denied: 'Camera access was blocked. Allow camera access in your browser settings, or type the serial number below.',
-  error: "The camera couldn't start. Check that no other app is using it, or type the serial number below.",
-  'ocr-error': "The text reader couldn't load. Check your connection, or type the serial number below.",
+  unsupported: 'The camera isn’t available here. It needs HTTPS or localhost. Type the serial number instead.',
+  denied: 'Camera access was blocked. Allow camera access in your browser settings, or type the serial number instead.',
+  error: 'The camera couldn’t start. Check that no other app is using it, or type the serial number instead.',
+  'ocr-error': 'The text reader couldn’t load. Check your connection, or type the serial number instead.',
 }
+
+const BLOCKED = ['unsupported', 'denied', 'error']
 
 /**
  * Copies the part of the video under the on-screen frame into `canvas`, upscaled and
@@ -70,20 +89,20 @@ function grabFrame(video, canvas) {
   return true
 }
 
-export default function Scanner({ scans, onSave, onBack, onHistory }) {
+export default function Scanner({ scans, onSave, onHistory }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const pausedRef = useRef(false)
-  // Keeps a label that is still in view from re-opening the sheet after Save/Discard.
+  // Keeps a label that is still in view from re-opening the dialog after Save/Discard.
   const [gate] = useState(() => createRepeatGate(2))
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState(() => (canUseCamera() ? 'starting' : 'unsupported'))
   const [pending, setPending] = useState(null)
   const [manual, setManual] = useState('')
   const [savedCount, setSavedCount] = useState(0)
-  const [toast, setToast] = useState('')
+  const toast = useToast()
 
-  /** OCRs the current frame. Returns true when a serial was found and the sheet opened. */
+  /** OCRs the current frame. Returns true when a serial was found and the dialog opened. */
   const readOnce = useCallback(async ({ ignoreRepeat = false } = {}) => {
     const video = videoRef.current
     if (!video || video.readyState < 2) return false
@@ -165,18 +184,12 @@ export default function Scanner({ scans, onSave, onBack, onHistory }) {
     }
   }, [readOnce, attempt])
 
-  useEffect(() => {
-    if (!toast) return
-    const id = setTimeout(() => setToast(''), 2400)
-    return () => clearTimeout(id)
-  }, [toast])
-
   async function capture() {
     setStatus('reading')
     const found = await readOnce({ ignoreRepeat: true }).catch(() => false)
     if (!found) {
       setStatus((s) => (s === 'reading' ? 'live' : s))
-      setToast('No S/N found. Move closer or type it below.')
+      toast('No S/N found. Move closer, or type the serial number instead.', { type: 'info' })
     }
   }
 
@@ -185,7 +198,7 @@ export default function Scanner({ scans, onSave, onBack, onHistory }) {
     setAttempt((n) => n + 1)
   }
 
-  /** Closes the sheet and resumes scanning. `serial` is the raw read, held until it leaves view. */
+  /** Closes the dialog and resumes scanning. `serial` is the raw read, held until it leaves view. */
   function resume(serial) {
     gate.hold(serial)
     pausedRef.current = false
@@ -212,73 +225,181 @@ export default function Scanner({ scans, onSave, onBack, onHistory }) {
     })
     savePrefs({ name: details.name, location: details.location })
     setSavedCount((n) => n + 1)
-    setToast(`Saved ${details.serial}`)
+    toast(`Saved ${details.serial}${details.name ? ` · ${details.name}` : ''}.`)
     resume(pending.serial)
   }
 
-  const cameraBlocked = ['unsupported', 'denied', 'error'].includes(status)
+  const cameraBlocked = BLOCKED.includes(status)
+  // Typing becomes the main action only when there is no Capture or Try again button.
+  const typedIsPrimary = status === 'unsupported' || status === 'denied'
+  const busy = status === 'starting' || status === 'loading' || status === 'reading'
+  const StatusIcon = busy
+    ? LoaderCircle
+    : status === 'paused'
+      ? CircleCheck
+      : cameraBlocked
+        ? CameraOff
+        : status === 'ocr-error'
+          ? TriangleAlert
+          : ScanText
 
   return (
-    <main className="screen scanner">
-      <header className="topbar">
-        <button type="button" className="icon-btn" onClick={onBack} aria-label="Back to home">
-          <BackIcon />
-        </button>
-        <h1 className="topbar-title">Scanner</h1>
-        <button type="button" className="text-btn" onClick={onHistory}>
-          History{savedCount > 0 && <span className="pill">+{savedCount}</span>}
-        </button>
-      </header>
+    <div className="grid gap-6">
+      <PageHeader
+        title="Scanner"
+        description="Reads the S/N from a device label. Check each read before you save it."
+        actions={
+          <Button variant="outline" onClick={onHistory}>
+            <History aria-hidden="true" />
+            History
+            {savedCount > 0 && (
+              <Badge variant="secondary" className="tabular-nums">
+                +{savedCount}
+                <span className="sr-only"> saved this visit</span>
+              </Badge>
+            )}
+          </Button>
+        }
+      />
 
-      <div className={`viewfinder${cameraBlocked ? ' is-blocked' : ''}${status === 'live' ? ' is-live' : ''}`}>
-        {!cameraBlocked && <video ref={videoRef} playsInline muted />}
-        <div className="frame" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-          {status === 'live' && <i className="scanline" />}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,34rem)_minmax(0,1fr)]">
+        <div className="grid gap-3">
+          {/* The camera surface stays black in both themes, so its status colors are fixed too. */}
+          <div
+            className={cn(
+              'relative max-h-[56dvh] w-full overflow-hidden rounded-xl border bg-black text-white shadow-xs',
+              // No camera: a shorter box, so the typed entry stays in view on phones.
+              cameraBlocked ? 'aspect-[16/10]' : 'aspect-[4/5]',
+            )}
+          >
+            {!cameraBlocked && <video ref={videoRef} playsInline muted className="absolute inset-0 size-full object-cover" />}
+
+            {!cameraBlocked && (
+              <div className="absolute inset-x-[8%] inset-y-[32%]" aria-hidden="true">
+                {[
+                  'top-0 left-0 rounded-tl-lg border-t-4 border-l-4',
+                  'top-0 right-0 rounded-tr-lg border-t-4 border-r-4',
+                  'bottom-0 left-0 rounded-bl-lg border-b-4 border-l-4',
+                  'bottom-0 right-0 rounded-br-lg border-b-4 border-r-4',
+                ].map((corner) => (
+                  <span
+                    key={corner}
+                    className={cn(
+                      'absolute size-8 transition-colors duration-150',
+                      corner,
+                      status === 'paused' ? 'border-emerald-400' : status === 'live' ? 'border-white' : 'border-white/40',
+                    )}
+                  />
+                ))}
+                {status === 'live' && (
+                  <div className="absolute inset-x-1.5 top-[12%] bottom-[12%]">
+                    <div className="h-full animate-[sweep_1.8s_ease-in-out_infinite_alternate]">
+                      <i className="block h-0.5 rounded-full bg-white/90 shadow-[0_0_12px_rgb(255_255_255/0.8)]" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p
+              role="status"
+              className={cn(
+                'absolute inset-x-4 mx-auto flex max-w-[60ch] items-center justify-center gap-2 text-center',
+                cameraBlocked
+                  ? 'top-1/2 -translate-y-1/2 flex-col gap-3 text-base leading-snug text-white/90'
+                  : 'bottom-4 rounded-lg bg-black/70 px-3.5 py-2.5 text-sm backdrop-blur-sm',
+              )}
+            >
+              <StatusIcon
+                className={cn(
+                  'shrink-0',
+                  cameraBlocked ? 'size-6 text-white/70' : 'size-4',
+                  busy && 'animate-spin',
+                  status === 'paused' && 'text-emerald-400',
+                  status === 'ocr-error' && 'text-amber-300',
+                )}
+                aria-hidden="true"
+              />
+              <span>{STATUS_TEXT[status]}</span>
+            </p>
+          </div>
+
+          {status === 'ocr-error' || status === 'error' ? (
+            <Button size="lg" className="w-full" onClick={retry}>
+              <RefreshCw aria-hidden="true" />
+              Try again
+            </Button>
+          ) : (
+            !cameraBlocked && (
+              <>
+                <Button size="lg" className="w-full" onClick={capture} disabled={status !== 'live'} loading={status === 'reading'}>
+                  {status !== 'reading' && <Camera aria-hidden="true" />}
+                  {status === 'reading' ? 'Reading…' : 'Capture'}
+                </Button>
+                <p className="text-center text-xs text-muted-foreground">
+                  Scanning runs on its own. Use Capture when a label won’t read.
+                </p>
+              </>
+            )
+          )}
         </div>
-        <p className="viewfinder-status" role="status">
-          {STATUS_TEXT[status]}
-        </p>
+
+        <div className="grid gap-6">
+          <Card as="section" aria-labelledby="manual-heading">
+            <CardHeader>
+              <CardTitle id="manual-heading">Type a serial number</CardTitle>
+              <CardDescription>For labels the camera can’t read.</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <form onSubmit={submitManual}>
+                <Field id="manual-serial" label="Serial number" hint="Saved in capital letters.">
+                  {(p) => (
+                    <div className="flex gap-2">
+                      <Input
+                        {...p}
+                        className="font-mono"
+                        value={manual}
+                        onChange={(e) => setManual(e.target.value.toUpperCase())}
+                        placeholder="e.g. 5CG1234XYZ"
+                        autoComplete="off"
+                        autoCapitalize="characters"
+                        spellCheck="false"
+                      />
+                      <Button type="submit" variant={typedIsPrimary ? 'default' : 'outline'} disabled={!manual.trim()}>
+                        <Plus aria-hidden="true" />
+                        Add
+                      </Button>
+                    </div>
+                  )}
+                </Field>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card as="section" aria-labelledby="tips-heading">
+            <CardHeader>
+              <CardTitle id="tips-heading">For a clean read</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-3">
+              <ul className="grid gap-2 text-sm text-muted-foreground">
+                {[
+                  'Fill the frame with the S/N line and hold the phone steady.',
+                  'Use even light. Tilt the device a little to get rid of glare.',
+                  'Check the read against the label before you save. Fix any wrong characters.',
+                ].map((tip) => (
+                  <li key={tip} className="flex gap-2">
+                    <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                    {tip}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {(status === 'ocr-error' || status === 'error') && (
-        <button type="button" className="btn btn-tape capture-btn" onClick={retry}>
-          Try again
-        </button>
-      )}
-
-      {!cameraBlocked && status !== 'ocr-error' && (
-        <button type="button" className="btn btn-dark capture-btn" onClick={capture} disabled={status !== 'live'}>
-          {status === 'reading' ? 'Reading…' : 'Capture'}
-        </button>
-      )}
-
-      <form className="manual" onSubmit={submitManual}>
-        <label htmlFor="manual-serial" className="field-label">
-          Type a serial number
-        </label>
-        <div className="manual-row">
-          <input
-            id="manual-serial"
-            className="input mono"
-            value={manual}
-            onChange={(e) => setManual(e.target.value.toUpperCase())}
-            placeholder="e.g. 5CG1234XYZ"
-            autoComplete="off"
-            autoCapitalize="characters"
-            spellCheck="false"
-          />
-          <button type="submit" className="btn btn-dark" disabled={!manual.trim()}>
-            Add
-          </button>
-        </div>
-      </form>
-
       {pending && (
-        <ConfirmSheet
+        <ScanForm
           key={pending.id}
           pending={pending}
           scans={scans}
@@ -286,149 +407,6 @@ export default function Scanner({ scans, onSave, onBack, onHistory }) {
           onDiscard={() => resume(pending.serial)}
         />
       )}
-
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
-        </div>
-      )}
-    </main>
-  )
-}
-
-function ConfirmSheet({ pending, scans, onSave, onDiscard }) {
-  const [prefs] = useState(loadPrefs)
-  const [serial, setSerial] = useState(pending.serial)
-  const [name, setName] = useState(prefs.name ?? '')
-  const [model, setModel] = useState(pending.model)
-  const [color, setColor] = useState(pending.color)
-  const [location, setLocation] = useState(prefs.location ?? '')
-  const [note, setNote] = useState('')
-
-  const cleanSerial = serial.trim()
-  const existing = cleanSerial && scans.find((s) => s.serial.toLowerCase() === cleanSerial.toLowerCase())
-
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onDiscard()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onDiscard])
-
-  function submit(e) {
-    e.preventDefault()
-    if (!cleanSerial) return
-    onSave({
-      serial: cleanSerial,
-      name: name.trim(),
-      model: model.trim(),
-      color: color.trim(),
-      location: location.trim(),
-      note: note.trim(),
-    })
-  }
-
-  return (
-    <div className="sheet-backdrop">
-      <form className="sheet" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-        <div className="tag">
-          <label id="sheet-title" htmlFor="sheet-serial" className="tag-label">
-            {pending.source === 'camera' ? 'Serial number read from label' : 'Typed serial number'}
-          </label>
-          <input
-            id="sheet-serial"
-            className="tag-serial"
-            value={serial}
-            onChange={(e) => setSerial(e.target.value.toUpperCase())}
-            autoComplete="off"
-            autoCapitalize="characters"
-            spellCheck="false"
-          />
-          {pending.source === 'camera' && <span className="tag-hint">Check it matches the label. Tap to fix.</span>}
-        </div>
-
-        {existing && (
-          <p className="notice">
-            Already scanned {formatDay(existing.scannedAt).toLowerCase()} at {formatTime(existing.scannedAt)}
-            {existing.location ? `, ${existing.location}` : ''}. Saving adds it again.
-          </p>
-        )}
-
-        <div className="field">
-          <label htmlFor="item-name" className="field-label">
-            Name
-          </label>
-          <input
-            id="item-name"
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Dell Latitude laptop"
-            autoFocus
-          />
-        </div>
-
-        <div className="field-pair">
-          <div className="field">
-            <label htmlFor="item-model" className="field-label">
-              Model
-            </label>
-            <input
-              id="item-model"
-              className="input"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. 5420"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="item-color" className="field-label">
-              Color
-            </label>
-            <input
-              id="item-color"
-              className="input"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              placeholder="e.g. Black"
-            />
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="loc" className="field-label">
-            Location <span className="optional">optional</span>
-          </label>
-          <input
-            id="loc"
-            className="input"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="e.g. Stockroom B, shelf 3"
-          />
-        </div>
-
-        <div className="field">
-          <label htmlFor="note" className="field-label">
-            Note <span className="optional">optional</span>
-          </label>
-          <input
-            id="note"
-            className="input"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. Charger missing"
-          />
-        </div>
-
-        <div className="sheet-actions">
-          <button type="button" className="btn btn-ghost" onClick={onDiscard}>
-            Discard
-          </button>
-          <button type="submit" className="btn btn-tape" disabled={!cleanSerial}>
-            Save scan
-          </button>
-        </div>
-      </form>
     </div>
   )
 }

@@ -1,22 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, PanelRightOpen, Plus, Search, Trash2 } from 'lucide-react'
-import { Button } from './ui/button.jsx'
-import { Input } from './ui/input.jsx'
-import { downloadCsv, itemName } from '../storage.js'
+import { Button, ConfirmDialog, Input, Kbd } from './ui.jsx'
+import { downloadCsv, formatDate, formatTime, itemName, methodLabel } from '../storage.js'
 import { cn } from '../lib/utils.js'
+import { deletedFrom } from '../lib/api.js'
+import { useToast } from '../lib/toast.js'
 
-const formatStamp = (iso) =>
-  new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const formatStamp = (iso) => `${formatDate(iso)} · ${formatTime(iso)}`
 
 // Column order follows the CSV export so the sheet and the file line up.
 const COLUMNS = [
   { key: 'serial', label: 'Serial number', width: 168, mono: true },
   { key: 'name', label: 'Name', width: 200, get: itemName },
+  { key: 'user', label: 'User', width: 180 },
   { key: 'model', label: 'Model', width: 150 },
   { key: 'color', label: 'Color', width: 110 },
   { key: 'location', label: 'Location', width: 180 },
   { key: 'note', label: 'Note', width: 240 },
-  { key: 'source', label: 'Method', width: 96, readOnly: true, get: (s) => (s.source === 'camera' ? 'Camera' : 'Typed') },
+  { key: 'source', label: 'Method', width: 96, readOnly: true, get: methodLabel },
   { key: 'scannedAt', label: 'Scanned at', width: 176, readOnly: true, mono: true, get: (s) => formatStamp(s.scannedAt) },
 ]
 
@@ -45,6 +46,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
   const [selected, setSelected] = useState(() => (focusId ? new Set([focusId]) : new Set()))
   const [anchorId, setAnchorId] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const toast = useToast()
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -204,17 +206,21 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
   const tableWidth = ROW_HEADER_W + COLUMNS.reduce((sum, col) => sum + col.width, 0)
 
   return (
-    <main className="flex min-h-[calc(100dvh-3.5rem)] flex-1 flex-col bg-card lg:min-h-0">
+    <div className="flex min-h-0 flex-1 flex-col bg-card">
       {/* Title + toolbar */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3">
-        <div className="mr-auto min-w-0">
-          <h1 className="text-lg font-semibold">Spreadsheet</h1>
-          <p className="text-xs text-muted-foreground">
-            Double-click or start typing to edit a cell. Shift+Space selects a row. Changes save automatically.
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b px-4 py-4 sm:px-6">
+        <div className="mr-auto grid min-w-0 gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Spreadsheet</h1>
+          <p className="text-xs text-muted-foreground pointer-coarse:hidden">
+            Double-click or start typing to edit a cell. <Kbd>Shift</Kbd> + <Kbd>Space</Kbd> selects a row. Changes save
+            automatically.
+          </p>
+          <p className="hidden text-xs text-muted-foreground pointer-coarse:block">
+            Double-tap a cell to edit it. Tap a row number to select the row. Changes save automatically.
           </p>
         </div>
         <div className="relative w-full sm:w-64">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle-foreground" aria-hidden="true" />
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <label htmlFor="sheet-search" className="sr-only">
             Filter rows
           </label>
@@ -222,53 +228,31 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
             id="sheet-search"
             type="search"
             placeholder="Filter rows"
-            className="h-9 pl-9"
+            className="pl-9"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={addRow}>
+          <Button size="sm" onClick={addRow}>
             <Plus aria-hidden="true" />
             Add row
           </Button>
-          <Button variant="secondary" size="sm" disabled={!activeRow} onClick={() => onOpenItem(activeRow.id)}>
+          <Button variant="outline" size="sm" disabled={!activeRow} onClick={() => onOpenItem(activeRow.id)}>
             <PanelRightOpen aria-hidden="true" />
             Details
           </Button>
-          {confirmDelete ? (
-            <span className="flex items-center gap-1.5 rounded-md bg-destructive-soft py-1 pr-1 pl-3" role="alert">
-              <span className="text-sm font-medium text-destructive">
-                Delete {selectedIds.length} {selectedIds.length === 1 ? 'row' : 'rows'}?
-              </span>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  onDeleteMany(selectedIds)
-                  setSelected(new Set())
-                  setConfirmDelete(false)
-                }}
-              >
-                Delete
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
-                Keep
-              </Button>
-            </span>
-          ) : (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={!selectedIds.length}
-              onClick={() => setConfirmDelete(true)}
-              title={selectedIds.length ? undefined : 'Select rows by clicking their numbers'}
-            >
-              <Trash2 aria-hidden="true" />
-              Delete rows{selectedIds.length > 0 && ` (${selectedIds.length})`}
-            </Button>
-          )}
-          <Button variant="secondary" size="sm" disabled={!rows.length} onClick={() => downloadCsv(rows)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!selectedIds.length}
+            onClick={() => setConfirmDelete(true)}
+            title={selectedIds.length ? undefined : 'Select rows by clicking their numbers'}
+          >
+            <Trash2 aria-hidden="true" />
+            Delete rows{selectedIds.length > 0 && ` (${selectedIds.length})`}
+          </Button>
+          <Button variant="outline" size="sm" disabled={!rows.length} onClick={() => downloadCsv(rows)}>
             <Download aria-hidden="true" />
             Export CSV
           </Button>
@@ -276,14 +260,14 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
       </div>
 
       {/* Formula bar */}
-      <div className="flex h-9 items-stretch border-b border-grid-line text-sm">
+      <div className="flex h-9 items-stretch border-b text-sm">
         <div
-          className="flex w-20 shrink-0 items-center justify-center border-r border-grid-line font-mono text-xs font-medium text-muted-foreground"
+          className="flex w-20 shrink-0 items-center justify-center border-r font-mono text-xs font-medium text-muted-foreground tabular-nums"
           aria-label="Selected cell"
         >
           {activeRow ? `${letter(c)}${r + 2}` : ''}
         </div>
-        <div className="flex shrink-0 items-center border-r border-grid-line px-3 font-serif text-sm text-subtle-foreground italic" aria-hidden="true">
+        <div className="flex shrink-0 items-center border-r px-3 font-serif text-sm text-muted-foreground italic" aria-hidden="true">
           fx
         </div>
         <label htmlFor="formula-bar" className="sr-only">
@@ -292,7 +276,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
         <input
           id="formula-bar"
           className={cn(
-            'min-w-0 flex-1 bg-transparent px-3 outline-none focus-visible:bg-accent-soft/40',
+            'min-w-0 flex-1 bg-transparent px-3 text-base outline-none focus-visible:bg-muted/50 sm:text-sm',
             col?.mono && 'font-mono',
           )}
           value={editing ? editing.value : activeValue}
@@ -332,7 +316,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
             {/* Column letters */}
             <tr aria-hidden="true">
               <th
-                className="sticky top-0 left-0 z-30 h-6 border-r border-b border-grid-line bg-grid-header"
+                className="sticky top-0 left-0 z-30 h-6 border-r border-b bg-muted"
                 onClick={() => setSelected(allSelected ? new Set() : new Set(rows.map((s) => s.id)))}
                 title="Select all rows"
               />
@@ -340,8 +324,8 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                 <th
                   key={column.key}
                   className={cn(
-                    'sticky top-0 z-20 h-6 border-r border-b border-grid-line bg-grid-header text-center text-xs font-normal text-muted-foreground',
-                    i === c && activeRow && 'bg-[#d1fae5] font-semibold text-foreground',
+                    'sticky top-0 z-20 h-6 border-r border-b bg-muted text-center text-xs font-normal text-muted-foreground',
+                    i === c && activeRow && 'bg-grid-active font-semibold text-foreground',
                   )}
                 >
                   {letter(i)}
@@ -352,7 +336,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
             <tr aria-rowindex={1}>
               <th
                 scope="row"
-                className="sticky top-6 left-0 z-30 h-8 border-r border-b-2 border-grid-line border-b-input bg-grid-header text-center text-xs font-normal text-muted-foreground"
+                className="sticky top-6 left-0 z-30 h-8 border-r border-b-2 border-b-input bg-muted text-center text-xs font-normal text-muted-foreground"
               >
                 1
               </th>
@@ -365,7 +349,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                     scope="col"
                     aria-colindex={i + 1}
                     aria-sort={sorted ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className="sticky top-6 z-20 h-8 border-r border-b-2 border-grid-line border-b-input bg-card p-0"
+                    className="sticky top-6 z-20 h-8 border-r border-b-2 border-b-input bg-card p-0"
                   >
                     <button
                       type="button"
@@ -376,7 +360,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                     >
                       <span className="truncate">{column.label}</span>
                       <SortIcon
-                        className={cn('ml-auto size-3.5 shrink-0', sorted ? 'text-accent-strong' : 'text-input')}
+                        className={cn('ml-auto size-3.5 shrink-0', sorted ? 'text-foreground' : 'text-muted-foreground/50')}
                         aria-hidden="true"
                       />
                     </button>
@@ -405,9 +389,9 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                       scope="row"
                       onClick={(e) => selectRow(scan.id, e)}
                       className={cn(
-                        'sticky left-0 z-10 h-8 cursor-pointer border-r border-b border-grid-line bg-grid-header text-center text-xs font-normal text-muted-foreground tabular-nums select-none hover:bg-muted',
-                        isActiveRow && 'bg-[#d1fae5] font-semibold text-foreground',
-                        isSelected && 'bg-accent text-white hover:bg-accent-strong',
+                        'sticky left-0 z-10 h-8 cursor-pointer border-r border-b bg-muted text-center text-xs font-normal text-muted-foreground tabular-nums select-none hover:bg-grid-active',
+                        isActiveRow && 'bg-grid-active font-semibold text-foreground',
+                        isSelected && 'bg-primary text-primary-foreground hover:bg-primary',
                       )}
                       title="Select row (Shift or Ctrl to select more)"
                     >
@@ -433,11 +417,11 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                           }}
                           onDoubleClick={() => startEdit()}
                           className={cn(
-                            'relative h-8 scroll-mt-14 scroll-ml-12 overflow-hidden border-r border-b border-grid-line px-2 whitespace-nowrap text-ellipsis',
+                            'relative h-8 scroll-mt-14 scroll-ml-12 overflow-hidden border-r border-b px-2 whitespace-nowrap text-ellipsis',
                             column.mono && 'font-mono text-[13px]',
                             column.readOnly && 'text-muted-foreground',
-                            isSelected && 'bg-accent-soft',
-                            isActive && 'z-[1] outline-2 -outline-offset-2 outline-accent',
+                            isSelected && 'bg-muted/70',
+                            isActive && 'z-[1] outline-2 -outline-offset-2 outline-foreground',
                           )}
                         >
                           {isEditingHere ? (
@@ -445,7 +429,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                               autoFocus
                               aria-label={`${column.label}, row ${ri + 2}`}
                               className={cn(
-                                'absolute inset-0 w-full bg-white px-2 outline-2 -outline-offset-2 outline-accent',
+                                'absolute inset-0 w-full bg-background px-2 outline-2 -outline-offset-2 outline-foreground',
                                 column.mono && 'font-mono text-[13px]',
                               )}
                               value={editing.value}
@@ -456,7 +440,7 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                               spellCheck="false"
                             />
                           ) : (
-                            text || (column.key === 'serial' && <span className="text-destructive/70 italic">Missing</span>)
+                            text || (column.key === 'serial' && <span className="text-destructive">Missing</span>)
                           )}
                         </td>
                       )
@@ -467,11 +451,11 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
             )}
             {Array.from({ length: Math.max(0, MIN_ROWS - rows.length) }, (_, i) => (
               <tr key={`pad-${i}`} aria-hidden="true">
-                <th className="sticky left-0 z-10 h-8 border-r border-b border-grid-line bg-grid-header text-center text-xs font-normal text-subtle-foreground tabular-nums">
+                <th className="sticky left-0 z-10 h-8 border-r border-b bg-muted text-center text-xs font-normal text-muted-foreground/70 tabular-nums">
                   {rows.length + i + 2}
                 </th>
                 {COLUMNS.map((column) => (
-                  <td key={column.key} className="h-8 border-r border-b border-grid-line" />
+                  <td key={column.key} className="h-8 border-r border-b" />
                 ))}
               </tr>
             ))}
@@ -480,17 +464,32 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
       </div>
 
       {/* Sheet tabs / status bar */}
-      <div className="flex h-10 shrink-0 items-stretch border-t border-grid-line bg-grid-header text-sm">
-        <span className="flex items-center border-r border-grid-line border-t-2 border-t-accent bg-card px-4 font-medium text-accent-strong">
-          Scans
-        </span>
-        <p className="ml-auto flex items-center gap-4 px-4 text-xs text-muted-foreground" role="status">
+      <div className="flex h-10 shrink-0 items-stretch border-t bg-muted text-sm">
+        <span className="-mt-px flex items-center border-x border-t-2 border-t-foreground bg-card px-4 font-medium">Scans</span>
+        <p className="ml-auto flex items-center gap-4 px-4 text-xs text-muted-foreground tabular-nums" role="status">
           {selectedIds.length > 0 && <span>{selectedIds.length} selected</span>}
           <span>
             {query ? `${rows.length} of ${scans.length} rows` : `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
           </span>
         </p>
       </div>
-    </main>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete ${selectedIds.length} ${selectedIds.length === 1 ? 'row' : 'rows'}?`}
+        description={`Removes the selected items ${deletedFrom}. This can’t be undone.`}
+        cancelLabel="Keep rows"
+        confirmLabel={selectedIds.length === 1 ? 'Delete row' : `Delete ${selectedIds.length} rows`}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          const n = selectedIds.length
+          onDeleteMany(selectedIds)
+          setSelected(new Set())
+          setConfirmDelete(false)
+          toast(`Deleted ${n} ${n === 1 ? 'row' : 'rows'}.`)
+          focusGrid()
+        }}
+      />
+    </div>
   )
 }

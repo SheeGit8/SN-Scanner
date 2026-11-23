@@ -12,3 +12,6 @@ export function matchesQuery(values, query) {
   if (!q) return true
   return values.some((v) => String(v ?? '').toLowerCase().includes(q))
 }
+
+/** Visible 3 px focus ring for keyboard users, at full opacity. */
+export const focusRing = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:border-ring'

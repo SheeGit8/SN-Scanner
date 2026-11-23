@@ -1,15 +1,17 @@
-import { ArrowRight, ScanText, Sheet } from 'lucide-react'
-import { Button } from './ui/button.jsx'
-import PageHeader from './PageHeader.jsx'
+import { ArrowRight, CalendarDays, Camera, MapPin, Package, ScanText, Sheet } from 'lucide-react'
+import { Button, Card, CardTitle } from './ui.jsx'
+import { EmptyState, PageHeader, StatCard } from './Layout.jsx'
 import ScanRow from './ScanRow.jsx'
-import { isSameDay } from '../storage.js'
+import { formatLongDate, formatRelative, isSameDay } from '../storage.js'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-export default function Dashboard({ scans, onScan, onSheet, onHistory, onOpen }) {
+export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, onOpen }) {
   const now = new Date()
   const todayCount = scans.filter((s) => isSameDay(new Date(s.scannedAt), now)).length
   const weekCount = scans.filter((s) => now.getTime() - new Date(s.scannedAt).getTime() < WEEK_MS).length
+  const missingSerial = scans.filter((s) => !s.serial?.trim()).length
+  const latest = scans.reduce((a, s) => (!a || s.scannedAt > a.scannedAt ? s : a), null)
 
   const byLocation = new Map()
   for (const s of scans) {
@@ -21,63 +23,75 @@ export default function Dashboard({ scans, onScan, onSheet, onHistory, onOpen })
   const topLocations = locations.slice(0, 6)
   const maxCount = topLocations[0]?.[1] ?? 1
 
-  const stats = [
-    { label: 'Items in stock list', value: scans.length },
-    { label: 'Scanned today', value: todayCount },
-    { label: 'Last 7 days', value: weekCount },
-    { label: 'Locations', value: namedLocations },
-  ]
-
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <PageHeader title="Dashboard" description="Serial numbers read from device labels, saved in this browser.">
-        <Button variant="secondary" onClick={onSheet}>
-          <Sheet aria-hidden="true" />
-          Open spreadsheet
-        </Button>
-        <Button onClick={onScan}>
-          <ScanText aria-hidden="true" />
-          Open scanner
-        </Button>
-      </PageHeader>
+    <div className="grid gap-6">
+      <PageHeader
+        title="Dashboard"
+        description={`${formatLongDate(now)} · serial numbers read from device labels`}
+        actions={
+          <>
+            <Button variant="outline" onClick={onSheet}>
+              <Sheet aria-hidden="true" />
+              Open spreadsheet
+            </Button>
+            <Button variant="outline" onClick={onPhoto}>
+              <Camera aria-hidden="true" />
+              Take photo
+            </Button>
+            <Button onClick={onScan}>
+              <ScanText aria-hidden="true" />
+              Open scanner
+            </Button>
+          </>
+        }
+      />
 
-      <dl className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-card lg:grid-cols-4">
-        {stats.map((s, i) => (
-          <div
-            key={s.label}
-            className={[
-              'px-5 py-4',
-              i % 2 === 1 ? 'border-l border-border' : '',
-              i >= 2 ? 'border-t border-border lg:border-t-0' : '',
-              i === 2 ? 'lg:border-l' : '',
-            ].join(' ')}
-          >
-            <dt className="text-sm text-muted-foreground">{s.label}</dt>
-            <dd className="mt-1 font-mono text-3xl font-semibold tabular-nums">{s.value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Items"
+          value={scans.length}
+          icon={Package}
+          tone={missingSerial ? 'warning' : 'default'}
+          hint={missingSerial ? `${missingSerial} without a serial number` : 'In the stock list'}
+        />
+        <StatCard
+          label="Scanned today"
+          value={todayCount}
+          icon={ScanText}
+          hint={latest ? `Last scan ${formatRelative(latest.scannedAt, now).toLowerCase()}` : 'Nothing scanned yet'}
+        />
+        <StatCard label="Last 7 days" value={weekCount} icon={CalendarDays} hint="Scans in the past week" />
+        <StatCard
+          label="Locations"
+          value={namedLocations}
+          icon={MapPin}
+          hint={
+            byLocation.get('')
+              ? `${byLocation.get('')} ${byLocation.get('') === 1 ? 'item' : 'items'} with no location`
+              : 'Every item has a location'
+          }
+        />
+      </div>
 
       {scans.length === 0 ? (
-        <section className="rounded-lg border border-dashed border-input bg-card px-6 py-12 text-center">
-          <ScanText className="mx-auto size-10 text-subtle-foreground" aria-hidden="true" />
-          <h2 className="mt-3 text-lg font-semibold">No items yet</h2>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-            Point the scanner at the S/N on a device label, or type the serial number in.
-          </p>
-          <Button className="mt-5" onClick={onScan}>
-            <ScanText aria-hidden="true" />
-            Open scanner
-          </Button>
-        </section>
+        <EmptyState
+          icon={ScanText}
+          as="h2"
+          title="No items yet"
+          description="Point the scanner at the S/N on a device label, or type the serial number in."
+          action={
+            <Button variant="outline" onClick={onSheet}>
+              <Sheet aria-hidden="true" />
+              Add rows by hand
+            </Button>
+          }
+        />
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-          <section aria-labelledby="recent-heading" className="overflow-hidden rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h2 id="recent-heading" className="font-semibold">
-                Recently scanned
-              </h2>
-              <Button variant="ghost" size="sm" onClick={onHistory}>
+          <Card as="section" aria-labelledby="recent-heading" className="overflow-hidden">
+            <div className="flex items-center justify-between gap-2 border-b px-5 py-3">
+              <CardTitle id="recent-heading">Recently scanned</CardTitle>
+              <Button variant="ghost" size="sm" onClick={onHistory} className="-mr-2">
                 View history
                 <ArrowRight aria-hidden="true" />
               </Button>
@@ -87,32 +101,28 @@ export default function Dashboard({ scans, onScan, onSheet, onHistory, onOpen })
                 <ScanRow key={s.id} scan={s} onOpen={onOpen} />
               ))}
             </ul>
-          </section>
+          </Card>
 
-          <section aria-labelledby="loc-heading" className="rounded-lg border border-border bg-card">
-            <div className="border-b border-border px-4 py-3">
-              <h2 id="loc-heading" className="font-semibold">
-                Items by location
-              </h2>
+          <Card as="section" aria-labelledby="loc-heading" className="self-start">
+            <div className="border-b px-5 py-4">
+              <CardTitle id="loc-heading">Items by location</CardTitle>
             </div>
-            <ul className="space-y-3 px-4 py-4">
+            <ul className="grid gap-3 px-5 py-4">
               {topLocations.map(([name, count]) => (
                 <li key={name || '__none'}>
                   <div className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className={name ? 'truncate' : 'truncate italic text-subtle-foreground'}>
-                      {name || 'No location'}
-                    </span>
-                    <span className="font-mono tabular-nums text-muted-foreground">{count}</span>
+                    <span className={name ? 'truncate' : 'truncate text-muted-foreground italic'}>{name || 'No location'}</span>
+                    <span className="font-mono text-muted-foreground tabular-nums">{count}</span>
                   </div>
                   <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${(count / maxCount) * 100}%` }} />
+                    <div className="h-full rounded-full bg-foreground/70" style={{ width: `${(count / maxCount) * 100}%` }} />
                   </div>
                 </li>
               ))}
             </ul>
-          </section>
+          </Card>
         </div>
       )}
-    </main>
+    </div>
   )
 }

@@ -1,4 +1,4 @@
-const SCANS_KEY = 'it-stock-scans-v1'
+export const SCANS_KEY = 'it-stock-scans-v1'
 const PREFS_KEY = 'it-stock-prefs-v1'
 
 function read(key, fallback) {
@@ -28,10 +28,22 @@ export function isSameDay(a, b) {
   )
 }
 
+/** "7:06 AM" */
 export function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
+/** "Nov 18, 2026" */
+export function formatDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** "Wed, Nov 18, 2026", for headers. */
+export function formatLongDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** "Today", "Yesterday" or "Wed, Nov 18, 2026". */
 export function formatDay(iso) {
   const d = new Date(iso)
   const today = new Date()
@@ -39,7 +51,20 @@ export function formatDay(iso) {
   yesterday.setDate(today.getDate() - 1)
   if (isSameDay(d, today)) return 'Today'
   if (isSameDay(d, yesterday)) return 'Yesterday'
-  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  return formatLongDate(iso)
+}
+
+/** "Just now", "5 min ago", "2h ago", "Yesterday", "3 days ago", then the date. */
+export function formatRelative(iso, now = new Date()) {
+  const d = new Date(iso)
+  const mins = Math.floor((now - d) / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins} min ago`
+  if (isSameDay(d, now)) return `${Math.floor(mins / 60)}h ago`
+  const days = Math.round((new Date(now).setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000)
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return `${days} days ago`
+  return formatDate(iso)
 }
 
 function csvCell(value) {
@@ -50,17 +75,24 @@ function csvCell(value) {
 /** Display name for a scan; older records only stored an item type. */
 export const itemName = (scan) => scan.name || scan.type || ''
 
-export const CSV_HEADER = ['Serial number', 'Name', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
+/** How the item was added: read by the camera, from a label photo, or typed in. */
+export const methodLabel = (scan) => ({ camera: 'Camera', photo: 'Photo' })[scan.source] ?? 'Typed'
+
+/** The text fields a search or filter looks in. `user` is the person who uses the item. */
+export const searchValues = (s) => [s.serial, itemName(s), s.user, s.model, s.color, s.location, s.note]
+
+export const CSV_HEADER = ['Serial number', 'Name', 'User', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
 
 export function csvRow(s) {
   return [
     s.serial ?? '',
     itemName(s),
+    s.user ?? '',
     s.model ?? '',
     s.color ?? '',
     s.location ?? '',
     s.note ?? '',
-    s.source === 'camera' ? 'Camera' : 'Typed',
+    methodLabel(s),
     new Date(s.scannedAt).toLocaleString(),
   ]
 }

@@ -1,16 +1,109 @@
-# React + Vite
+# Sheehan IT Stock Scanner
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Scan or photograph the serial number label on IT equipment, and keep one shared stock list:
+what each item is, who uses it, and where it is.
 
-Currently, two official plugins are available:
+The list lives in a **Google Sheet**, which works as the app's database. Every phone and computer
+reads and writes the same sheet, and people can also open the sheet and edit it directly.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+Phone / PC ──app password──▶ Vercel /api/gas ──sync token──▶ Apps Script (code.gs) ──▶ Google Sheet + Drive
+```
 
-## React Compiler
+- **The app** (this repo) is hosted on Vercel. The camera needs a normal web page, so the app
+  can't be served from inside Apps Script.
+- **`api/gas.js`** is a small Vercel function. It checks the app password, then forwards the request
+  to Apps Script with the secret sync token. The browser never sees the token or the script's URL.
+- **`app-script/code.gs`** runs in Google Apps Script. It reads and writes the `Items` sheet, and
+  stores label photos in a Drive folder.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Setting it up
 
-## Expanding the ESLint configuration
+### 1. The Google Sheet and Apps Script
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Create a Google Sheet, for example "IT Stock". Open **Extensions → Apps Script**.
+2. Replace everything in `Code.gs` with the contents of [`app-script/code.gs`](app-script/code.gs), then save.
+3. In the function list at the top, pick **`generateSyncToken`** and press **Run**. Approve the
+   permissions Google asks for. Copy the token from the **Execution log**; you'll need it in step 2.
+4. Pick **`setup`** and press **Run**. This creates the `Items` sheet (red header row) and the Drive
+   folder **Sheehan IT Stock Photos**. Running it again is safe.
+5. **Deploy → New deployment → Web app**. Set **Execute as: Me** and **Who has access: Anyone**,
+   then **Deploy**. Copy the **Web app URL** (it ends in `/exec`).
+
+"Anyone" is needed so the Vercel server can call the script without a Google sign-in. Requests
+without the sync token are refused.
+
+### 2. Vercel
+
+In the Vercel project, go to **Settings → Environment Variables** and add:
+
+| Name           | Value                                                              |
+| -------------- | ------------------------------------------------------------------ |
+| `GAS_URL`      | The Web app URL from step 1.5 (ends in `/exec`)                    |
+| `SYNC_TOKEN`   | The token from step 1.3                                            |
+| `APP_PASSWORD` | A long password people type once on each device to open the list |
+
+Then redeploy. The variables are only read on the server. Don't give any of them a `VITE_` prefix,
+because that would put them inside the web page for anyone to read.
+
+### 3. Each phone or computer
+
+Open the app and enter the app password once. The device remembers it.
+
+Scans saved in a browser before the sheet was connected are added to the sheet automatically the
+first time that browser opens the connected app.
+
+## How it behaves
+
+- **Changes show at once and are saved in the background.** The sidebar (or the cloud icon in
+  the phone's top bar) shows *Synced*, *Saving…*, *Offline · 3 waiting* or what went wrong.
+  Tapping it retries.
+- **Offline is fine while the app is open.** Changes wait on the device and are sent when the
+  connection comes back, even if the tab was closed in between. (Opening the app from scratch
+  still needs a connection.)
+- **Other people's changes** appear within 45 seconds, or as soon as you come back to the app.
+- **Editing the sheet directly** is fine. You can sort, filter, fix typos and move columns; columns
+  are found by their header. A row you type in by hand gets an ID the next time the app loads.
+  Don't rename the headers or edit the `ID` column.
+- **Two people editing the same item:** only the fields each person changed are sent, so edits to
+  different fields both survive. If both change the same field, the later save wins.
+- **Label photos** are uploaded to the Drive folder after the item itself. The `Photo` column links
+  to the file. Other devices download a photo when someone opens the item. Deleting an item moves
+  its photo to the Drive trash.
+
+## Updating `code.gs`
+
+After pasting a newer `code.gs` into Apps Script: **Deploy → Manage deployments → Edit (pencil) →
+Version: New version → Deploy**. The URL stays the same, so Vercel needs no change.
+
+## Security
+
+- To revoke access (say, the token leaked), run `generateSyncToken` again and put the new token in
+  Vercel. The old one stops working at once. `removeSyncToken` turns access off completely.
+- To change the app password, change `APP_PASSWORD` in Vercel and redeploy. Every device asks for
+  the new one.
+- `SYNC_TOKEN` and `SPREADSHEET_URL` at the top of `code.gs` should stay empty in this repo. Fill
+  them in only inside the Apps Script editor, if at all.
+
+## Development
+
+```bash
+npm install
+npm run dev     # the app on its own: the list is kept in the browser, no sheet needed
+npm test        # unit tests (vitest)
+npm run lint
+npm run build
+```
+
+`.env.production` sets `VITE_REMOTE_API=/api/gas`, so builds on Vercel use the sheet. To try the
+sheet locally, put `GAS_URL`, `SYNC_TOKEN` and `APP_PASSWORD` in a `.env` file (git-ignored, see
+`.env.example`) and run `vercel dev`.
+
+| File                    | What it does                                                          |
+| ----------------------- | --------------------------------------------------------------------- |
+| `app-script/code.gs`    | The database: the `Items` sheet and the photos folder                 |
+| `api/gas.js`            | Vercel function between the app and Apps Script                       |
+| `src/lib/api.js`        | Calls `api/gas.js`; remembers the app password                        |
+| `src/stock.js`          | The stock list: offline queue, sending, checking for changes          |
+| `src/sync.js`           | The queue's rules (what is sent, in what order)                       |
+| `src/photos.js`         | Label photos kept on the device (IndexedDB)                           |

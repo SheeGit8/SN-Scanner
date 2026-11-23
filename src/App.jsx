@@ -1,16 +1,21 @@
-import { useEffect, useState } from 'react'
-import { Menu, ScanText } from 'lucide-react'
-import Sidebar from './components/Sidebar.jsx'
+import { useEffect, useRef, useState } from 'react'
+import { MobileNav, Sidebar } from './components/Sidebar.jsx'
 import Dashboard from './components/Home.jsx'
 import Scanner from './components/Scanner.jsx'
+import PhotoCapture from './components/PhotoCapture.jsx'
 import History from './components/History.jsx'
 import Spreadsheet from './components/Spreadsheet.jsx'
 import ItemDrawer from './components/ItemDrawer.jsx'
-import { Button } from './components/ui/button.jsx'
-import { loadScans, makeId, saveScans } from './storage.js'
-import './App.css'
+import { FirstLoad, UnlockDialog } from './components/SyncStatus.jsx'
+import { ToastProvider } from './components/ui.jsx'
+import { makeId } from './storage.js'
+import { stock, useStock } from './stock.js'
+import { isRemote } from './lib/api.js'
+import { useTheme } from './lib/theme.js'
+import { useToast } from './lib/toast.js'
+import { cn } from './lib/utils.js'
 
-const VIEWS = ['home', 'scanner', 'history', 'sheet']
+const VIEWS = ['home', 'scanner', 'photo', 'history', 'sheet']
 
 const viewFromHash = () => {
   const v = window.location.hash.replace('#', '')
@@ -18,46 +23,68 @@ const viewFromHash = () => {
 }
 
 export default function App() {
+  return (
+    <ToastProvider>
+      <Shell />
+    </ToastProvider>
+  )
+}
+
+function Shell() {
   const [view, setViewState] = useState(viewFromHash)
-  const [scans, setScans] = useState(loadScans)
+  const snap = useStock()
+  const { scans } = snap
   const [selectedId, setSelectedId] = useState(null)
   const [navOpen, setNavOpen] = useState(false)
   const [sheetFocus, setSheetFocus] = useState(null)
+  const [dark, toggleTheme] = useTheme()
+  const mainRef = useRef(null)
+  const toast = useToast()
+
+  // The password prompt opens by itself once each time the sheet refuses the password, and
+  // again whenever someone taps Unlock.
+  const [dismissedLock, setDismissedLock] = useState(null)
+  const [unlockAsked, setUnlockAsked] = useState(false)
+  const unlockOpen = snap.state === 'locked' && (unlockAsked || dismissedLock !== snap.lockId)
+  const askUnlock = () => setUnlockAsked(true)
+  const closeUnlock = () => {
+    setDismissedLock(snap.lockId)
+    setUnlockAsked(false)
+  }
 
   useEffect(() => {
-    saveScans(scans)
-  }, [scans])
+    stock.setNotify((message, type) => toast(message, type ? { type } : undefined))
+  }, [toast])
 
   // The current screen lives in the URL hash, so the browser/phone back button works.
   useEffect(() => {
     const onHash = () => {
       setViewState(viewFromHash())
       setNavOpen(false)
+      window.scrollTo({ top: 0 })
+      // Move focus to the new page for keyboard and screen reader users.
+      requestAnimationFrame(() => mainRef.current?.focus({ preventScroll: true }))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [view])
-
   const setView = (next) => {
     window.location.hash = next === 'home' ? '' : next
   }
 
-  const addScan = (scan) => setScans((prev) => [scan, ...prev])
-  const updateScan = (id, patch) => setScans((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+  const addScan = (scan) => stock.add(scan)
+  const updateScan = (id, patch) => stock.update(id, patch)
   const deleteScans = (ids) => {
-    const gone = new Set(ids)
-    setScans((prev) => prev.filter((s) => !gone.has(s.id)))
-    if (gone.has(selectedId)) setSelectedId(null)
+    stock.remove(ids)
+    if (ids.includes(selectedId)) setSelectedId(null)
   }
   const addBlankRow = () => {
     const scan = {
       id: makeId(),
       serial: '',
       name: '',
+      user: '',
       model: '',
       color: '',
       location: '',
@@ -80,13 +107,20 @@ export default function App() {
   }
 
   const selected = scans.find((s) => s.id === selectedId) ?? null
+  // Until the sheet's list has loaded once on this device, the list screens wait for it. Scanning works.
+  const waiting = snap.mode === 'remote' && !snap.loaded && !['scanner', 'photo'].includes(view)
+  const isSheet = view === 'sheet' && !waiting
 
   let content
-  if (view === 'scanner') {
-    content = <Scanner scans={scans} onSave={addScan} onBack={() => setView('home')} onHistory={() => setView('history')} />
+  if (waiting) {
+    content = <FirstLoad snap={snap} onUnlock={askUnlock} />
+  } else if (view === 'scanner') {
+    content = <Scanner scans={scans} onSave={addScan} onHistory={() => setView('history')} />
+  } else if (view === 'photo') {
+    content = <PhotoCapture scans={scans} onSave={addScan} onHistory={() => setView('history')} />
   } else if (view === 'history') {
     content = <History scans={scans} onDelete={(id) => deleteScans([id])} onOpen={openItem} onScan={() => setView('scanner')} />
-  } else if (view === 'sheet') {
+  } else if (isSheet) {
     content = (
       <Spreadsheet
         key={sheetFocus?.at ?? 'sheet'}
@@ -103,6 +137,7 @@ export default function App() {
       <Dashboard
         scans={scans}
         onScan={() => setView('scanner')}
+        onPhoto={() => setView('photo')}
         onSheet={() => setView('sheet')}
         onHistory={() => setView('history')}
         onOpen={openItem}
@@ -110,48 +145,59 @@ export default function App() {
     )
   }
 
+  const navProps = {
+    scans,
+    view,
+    selectedId,
+    onNavigate: (v) => setView(v),
+    onOpenItem: openItem,
+    dark,
+    onToggleTheme: toggleTheme,
+    sync: snap,
+    onUnlock: askUnlock,
+  }
+
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[18.5rem_minmax(0,1fr)]">
+    <div className="flex min-h-dvh flex-col">
       <a
-        href="#main-content"
+        href="#main"
         onClick={(e) => {
           e.preventDefault()
-          document.getElementById('main-content')?.focus()
+          mainRef.current?.focus()
         }}
-        className="sr-only z-50 rounded-md bg-card px-3 py-2 font-medium focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+        className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium shadow focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
       >
         Skip to content
       </a>
 
-      <Sidebar
-        scans={scans}
-        view={view}
-        selectedId={selectedId}
-        open={navOpen}
-        onClose={() => setNavOpen(false)}
-        onNavigate={(v) => {
-          setNavOpen(false)
-          setView(v)
-        }}
-        onOpenItem={openItem}
-      />
+      <Sidebar {...navProps} />
+      <MobileNav {...navProps} open={navOpen} onOpenChange={setNavOpen} onScan={() => setView('scanner')} />
 
-      <div className="flex min-w-0 flex-col lg:h-dvh">
-        {view !== 'scanner' && (
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-card/95 px-3 backdrop-blur lg:hidden">
-            <Button variant="ghost" size="icon" aria-label="Open menu" aria-expanded={navOpen} onClick={() => setNavOpen(true)}>
-              <Menu className="size-5!" />
-            </Button>
-            <span className="flex-1 truncate font-semibold">IT Stock Scanner</span>
-            <Button size="sm" onClick={() => setView('scanner')}>
-              <ScanText aria-hidden="true" />
-              Scan
-            </Button>
-          </header>
-        )}
-        <div id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+      <div className="flex flex-1 flex-col md:pl-64">
+        <main
+          id="main"
+          ref={mainRef}
+          tabIndex={-1}
+          className={cn(
+            'outline-none',
+            isSheet
+              ? // The sheet fills the window under the 56 px mobile top bar, and scrolls inside itself.
+                'flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col md:h-dvh'
+              : 'mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6',
+          )}
+        >
           {content}
-        </div>
+        </main>
+
+        {!isSheet && (
+          <footer className="border-t">
+            <div className="mx-auto max-w-6xl px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-xs text-muted-foreground sm:px-6">
+              {isRemote
+                ? 'Sheehan IT Stock Scanner · the stock list is shared through the team’s Google Sheet. Changes made offline are sent when you’re back online.'
+                : 'Sheehan IT Stock Scanner · scans are saved in this browser on this device. Export a CSV to keep a copy.'}
+            </div>
+          </footer>
+        )}
       </div>
 
       {selected && (
@@ -164,6 +210,8 @@ export default function App() {
           onShowInSheet={openInSheet}
         />
       )}
+
+      {isRemote && <UnlockDialog open={unlockOpen} onClose={closeUnlock} pending={snap.pending} />}
     </div>
   )
 }
