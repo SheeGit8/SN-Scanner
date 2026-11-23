@@ -49,6 +49,7 @@ export function CategoryBadge({ category, className }) {
   return (
     <Badge
       className={cn('text-foreground', className)}
+      title={label} // the full name when a long one is shortened; the item's details show it too
       style={{
         backgroundColor: `color-mix(in oklab, ${color} 14%, transparent)`,
         borderColor: `color-mix(in oklab, ${color} 45%, transparent)`,
@@ -56,7 +57,7 @@ export function CategoryBadge({ category, className }) {
     >
       <CategoryIcon category={label} />
       <span className="sr-only">Category: </span>
-      {label}
+      <span className="min-w-0 truncate">{label}</span>
     </Badge>
   )
 }
