@@ -59,6 +59,23 @@
   --sidebar-input: oklch(0.5 0.006 286);
   /* Sheehan red, lightened to read on the dark sidebar: the active nav marker. */
   --sidebar-brand: oklch(0.64 0.2 25);
+
+  /*
+   * Category colors (categoryColor in src/storage.js): one hue per kind of item, so a kind is
+   * easy to spot. Checked with the data-viz palette validator: neighbors in the category list
+   * stay apart for color-blind readers too, in both themes. A color is never shown alone, always
+   * with the category's name and icon. Red is left out (it means a problem here); Other and
+   * categories typed into the sheet by hand are gray.
+   */
+  --cat-keyboard: #e08600;
+  --cat-mouse: #d6457f;
+  --cat-monitor: #2a78d6;
+  --cat-ram: #1baf7a;
+  --cat-processor: #6250d6;
+  --cat-graphics-card: #5f8f00;
+  --cat-storage: #0a93b8;
+  --cat-motherboard: #008300;
+  --cat-other: oklch(0.556 0 0);
 }
 
 .dark {
@@ -101,6 +118,17 @@
   --sidebar: oklch(0.165 0.004 286);
   --sidebar-accent: oklch(0.26 0.006 286);
   --sidebar-border: oklch(1 0 0 / 8%);
+
+  /* The same hues, stepped for the dark surface (all 3 : 1 or more against it). */
+  --cat-keyboard: #c97a00;
+  --cat-mouse: #d55181;
+  --cat-monitor: #3987e5;
+  --cat-ram: #199e70;
+  --cat-processor: #9085e9;
+  --cat-graphics-card: #7aa50c;
+  --cat-storage: #1a9cc0;
+  --cat-motherboard: #0ca30c;
+  --cat-other: oklch(0.6 0 0);
 }
 
 @theme inline {

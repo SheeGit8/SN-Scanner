@@ -3,16 +3,17 @@ import { Button, Card, CardTitle } from './ui.jsx'
 import { EmptyState, PageHeader, StatCard } from './Layout.jsx'
 import ScanRow from './ScanRow.jsx'
 import { CategoryIcon } from './Category.jsx'
-import { categoryGroups, formatLongDate, formatRelative, isSameDay, locationGroups } from '../storage.js'
+import { categoryColor, categoryGroups, formatLongDate, formatRelative, isSameDay, locationGroups } from '../storage.js'
 import { cn } from '../lib/utils.js'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
  * Counts with a bar each, in the order given. Each row opens History filtered to it.
- * `groups` is [{ key, label, count }]; key '' is the items without a value.
+ * `groups` is [{ key, label, count }]; key '' is the items without a value. `color(key, label)`
+ * can give a bar its own color; the rest are gray.
  */
-function GroupCard({ id, title, groups, onPick, describe, icon }) {
+function GroupCard({ id, title, groups, onPick, describe, icon, color }) {
   const max = Math.max(1, ...groups.map((g) => g.count))
   return (
     <Card as="section" aria-labelledby={id}>
@@ -40,7 +41,10 @@ function GroupCard({ id, title, groups, onPick, describe, icon }) {
                 </span>
               </span>
               <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                <span className="block h-full rounded-full bg-foreground/70" style={{ width: `${(count / max) * 100}%` }} />
+                <span
+                  className="block h-full rounded-full bg-foreground/70"
+                  style={{ width: `${(count / max) * 100}%`, backgroundColor: color?.(key, label) ?? undefined }}
+                />
               </span>
             </button>
           </li>
@@ -149,13 +153,8 @@ export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, 
               groups={categories}
               onPick={onCategory}
               describe={(key, label) => `See the ${key ? `${label} items` : 'items with no category'}`}
-              icon={(key, label) =>
-                key ? (
-                  <CategoryIcon category={label} className="size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <span className="size-4 shrink-0" aria-hidden="true" />
-                )
-              }
+              icon={(key, label) => <CategoryIcon category={key && label} className="size-4 shrink-0" />}
+              color={(key, label) => (key ? categoryColor(label) : null)}
             />
             <GroupCard
               id="loc-heading"

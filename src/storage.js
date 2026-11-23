@@ -141,6 +141,17 @@ export function tidyCategory(category) {
 /** A category made comparable. '' is no category. */
 export const categoryKey = (category) => tidy(category).toLowerCase()
 
+/**
+ * The CSS color for a category (the --cat-* tokens in index.css), or null for no category. A
+ * category the list doesn't have is gray, like Other.
+ */
+export function categoryColor(category) {
+  const key = categoryKey(category)
+  if (!key) return null
+  const known = CATEGORIES.some((c) => c.toLowerCase() === key)
+  return `var(--cat-${known ? key.replace(/ /g, '-') : 'other'})`
+}
+
 // List order; categories the list doesn't have go just before Other, and no category goes last.
 const categoryRank = (key) => {
   const i = CATEGORIES.findIndex((c) => c.toLowerCase() === key)

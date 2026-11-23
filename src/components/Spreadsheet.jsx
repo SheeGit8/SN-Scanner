@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, PanelRightOpen, Plus, Search, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog, Input, Kbd } from './ui.jsx'
 import LocationTabs from './LocationTabs.jsx'
-import { CategoryFilter } from './Category.jsx'
+import { CategoryFilter, CategoryIcon } from './Category.jsx'
 import {
   CATEGORIES,
   categoryGroups,
@@ -567,7 +567,12 @@ export default function Spreadsheet({
                               spellCheck="false"
                             />
                           ) : (
-                            text || (column.key === 'serial' && <span className="text-destructive">Missing</span>)
+                            <>
+                              {column.key === 'category' && text && (
+                                <CategoryIcon category={text} className="mr-1.5 inline size-3.5 -translate-y-px" />
+                              )}
+                              {text || (column.key === 'serial' && <span className="text-destructive">Missing</span>)}
+                            </>
                           )}
                         </td>
                       )

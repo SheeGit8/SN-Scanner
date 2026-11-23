@@ -1,8 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import {
-  itemName, csvRow, CSV_HEADER, searchValues, inLocation, locationGroups, locationKey,
-  CATEGORIES, tidyCategory, categoryKey, categoryGroups, inCategory,
-} from './storage.js'
+import { itemName, csvRow, CSV_HEADER, searchValues, inLocation, locationGroups, locationKey, CATEGORIES, tidyCategory, categoryKey, categoryGroups, inCategory, categoryColor } from './storage.js'
 
 describe('itemName', () => {
   it('falls back to legacy type', () => expect(itemName({ type: 'Laptop' })).toBe('Laptop'))
@@ -119,5 +117,26 @@ describe('location tabs', () => {
     expect(inLocation(scans, 'annex').map((s) => s.id)).toEqual(['Annex', 'b'])
     expect(inLocation(scans, '').map((s) => s.id)).toEqual(['n'])
     expect(inLocation(scans, null)).toBe(scans)
+  })
+})
+
+describe('categoryColor', () => {
+  it('gives each category its own color token', () => {
+    expect(categoryColor('Keyboard')).toBe('var(--cat-keyboard)')
+    expect(categoryColor(' graphics  CARD ')).toBe('var(--cat-graphics-card)')
+  })
+
+  it('has a token for every category in the list', () => {
+    const css = readFileSync(new URL('./index.css', import.meta.url), 'utf8')
+    for (const c of CATEGORIES) {
+      const token = categoryColor(c).slice(4, -1)
+      expect(css.match(new RegExp(`${token}:`, 'g'))?.length, token).toBe(2) // light and dark
+    }
+  })
+
+  it('is gray for a category typed into the sheet, and none without one', () => {
+    expect(categoryColor('Docking station')).toBe('var(--cat-other)')
+    expect(categoryColor('  ')).toBeNull()
+    expect(categoryColor(undefined)).toBeNull()
   })
 })

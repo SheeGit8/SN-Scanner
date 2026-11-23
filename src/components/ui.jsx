@@ -78,14 +78,21 @@ export function Input({ className, ...props }) {
 /**
  * A native <select> styled like Input. Phones open their own picker, which beats a custom list
  * for one-handed use. `className` goes on the wrapper, so it sizes the whole control.
+ * `leading` is an icon shown inside it, before the picked option.
  */
-export function Select({ className, selectClassName, children, ...props }) {
+export function Select({ className, selectClassName, leading, children, ...props }) {
   return (
     <div className={cn('relative min-w-0', className)}>
+      {leading && (
+        <span className="pointer-events-none absolute top-1/2 left-3 flex -translate-y-1/2 [&_svg]:size-4" aria-hidden="true">
+          {leading}
+        </span>
+      )}
       <select
         className={cn(
           inputBase,
           'h-9 cursor-pointer appearance-none truncate py-1 pr-9 pointer-coarse:h-11 [&>option]:bg-popover [&>option]:text-foreground',
+          leading && 'pl-9',
           focusRing,
           selectClassName,
         )}
