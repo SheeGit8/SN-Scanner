@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     const r = await fetch(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token: SYNC_TOKEN, fn, args }),
+      body: JSON.stringify({ token: SYNC_TOKEN.trim(), fn, args }), // a pasted space must not break it
       redirect: 'follow',
     })
     data = JSON.parse(await r.text())

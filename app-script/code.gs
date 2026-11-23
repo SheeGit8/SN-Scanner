@@ -342,8 +342,9 @@ function spreadsheet_() {
 
 /** SYNC_TOKEN at the top of this file, else the one made by generateSyncToken. */
 function syncToken_() {
+  // Trimmed, so a space or line break picked up while pasting the token doesn't break it.
   return String(SYNC_TOKEN || '').trim() ||
-    PropertiesService.getScriptProperties().getProperty(CONFIG.SYNC_TOKEN_PROPERTY) || '';
+    String(PropertiesService.getScriptProperties().getProperty(CONFIG.SYNC_TOKEN_PROPERTY) || '').trim();
 }
 
 function withLock_(fn) {
