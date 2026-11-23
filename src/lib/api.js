@@ -16,24 +16,30 @@ export const deletedFrom = isRemote ? 'from the shared stock list, for everyone'
 /** Apps Script can wait up to 20 s for the sheet's lock, then do the work. */
 const TIMEOUT_MS = 60_000
 
-/* The app password, remembered on this device. */
-const PASSWORD_KEY = 'it-stock-app-password'
-let password = ''
-try {
-  password = localStorage.getItem(PASSWORD_KEY) || ''
-} catch {
-  /* storage blocked: ask each visit */
+/*
+ * The app password, remembered on this device until someone logs out. It is read from storage
+ * on every request, so logging in or out in one tab applies to the others too.
+ */
+export const PASSWORD_KEY = 'it-stock-app-password'
+let memoryPassword = '' // when the browser blocks storage: remembered until the page closes
+
+function getPassword() {
+  try {
+    return localStorage.getItem(PASSWORD_KEY) || ''
+  } catch {
+    return memoryPassword
+  }
 }
 
-export const hasPassword = () => !!password
+export const hasPassword = () => !!getPassword()
 
 export function setPassword(value) {
-  password = value
+  memoryPassword = value
   try {
     if (value) localStorage.setItem(PASSWORD_KEY, value)
     else localStorage.removeItem(PASSWORD_KEY)
   } catch {
-    /* ignore */
+    /* blocked: memoryPassword is used instead */
   }
 }
 
@@ -48,9 +54,14 @@ function apiError(message, extra) {
 }
 
 /** Calls a function in code.gs through the Vercel server and returns its result. */
-export async function call(fn, ...args) {
+export const call = (fn, ...args) => post(getPassword(), fn, args)
+
+/** Checks a password with the server without saving it. Throws when it's wrong or can't be checked. */
+export const checkPassword = (password) => post(password, 'getVersion', [])
+
+async function post(password, fn, args) {
   if (!remote) throw apiError('This copy of the app isn’t connected to the Google Sheet.', { status: 0 })
-  if (!password) throw apiError('Enter the app password.', { auth: true })
+  if (!password) throw apiError('Log in with the app password.', { auth: true })
   let res
   try {
     res = await fetch(remote, {

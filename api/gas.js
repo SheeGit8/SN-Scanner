@@ -26,6 +26,8 @@ export default async function handler(req, res) {
     })
   }
   if (!samePassword(req.headers['x-app-password'] || '', APP_PASSWORD)) {
+    // Slows down guessing. A long APP_PASSWORD is what really keeps people out.
+    await new Promise((resolve) => setTimeout(resolve, 1000))
     return res.status(401).json({ ok: false, error: 'Wrong password.' })
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Camera, History, LayoutDashboard, Menu, Moon, ScanText, Search, Sheet, Sun, UserRound, X } from 'lucide-react'
+import { Camera, History, LayoutDashboard, LogOut, Menu, Moon, ScanText, Search, Sheet, Sun, UserRound, X } from 'lucide-react'
 import logoUrl from '../assets/logo-mark.png'
 import { SyncIndicator, SyncStatus } from './SyncStatus.jsx'
 import { itemName, searchValues } from '../storage.js'
@@ -127,7 +127,7 @@ function ItemList({ scans, selectedId, onOpenItem }) {
 }
 
 /** Brand, main nav, the item list, and the storage note + theme toggle pinned to the bottom. */
-function SidebarBody({ scans, view, selectedId, onNavigate, onOpenItem, dark, onToggleTheme, onClose, sync, onUnlock }) {
+function SidebarBody({ scans, view, selectedId, onNavigate, onOpenItem, dark, onToggleTheme, onClose, sync, onLogout }) {
   return (
     <div className="flex h-full flex-col bg-sidebar px-3 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] text-sidebar-foreground">
       <div className="flex items-center justify-between gap-2 px-2">
@@ -170,19 +170,44 @@ function SidebarBody({ scans, view, selectedId, onNavigate, onOpenItem, dark, on
 
       <ItemList scans={scans} selectedId={selectedId} onOpenItem={onOpenItem} />
 
-      <div className="flex items-center gap-2 border-t border-white/10 px-2 pt-3">
-        <SyncStatus snap={sync} onUnlock={onUnlock} />
-        <button
-          type="button"
-          onClick={onToggleTheme}
-          className={iconBtn}
-          aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
-          title={dark ? 'Light theme' : 'Dark theme'}
-        >
-          {dark ? <Sun className="size-[18px]" aria-hidden="true" /> : <Moon className="size-[18px]" aria-hidden="true" />}
-        </button>
+      <div className="grid gap-1 border-t border-white/10 px-2 pt-3">
+        {/* Logged in: the sync status gets its own row, so "Offline · 3 waiting" isn't cut off. */}
+        <div className="flex min-h-9 items-center gap-2">
+          <SyncStatus snap={sync} />
+          {!onLogout && <ThemeButton dark={dark} onToggle={onToggleTheme} />}
+        </div>
+        {onLogout && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onLogout}
+              className={cn(
+                '-mx-1 flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-1 text-xs font-medium text-sidebar-muted transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground pointer-coarse:h-11',
+                sidebarFocus,
+              )}
+            >
+              <LogOut className="size-3.5 shrink-0" aria-hidden="true" />
+              Log out
+            </button>
+            <ThemeButton dark={dark} onToggle={onToggleTheme} />
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+function ThemeButton({ dark, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={iconBtn}
+      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      title={dark ? 'Light theme' : 'Dark theme'}
+    >
+      {dark ? <Sun className="size-[18px]" aria-hidden="true" /> : <Moon className="size-[18px]" aria-hidden="true" />}
+    </button>
   )
 }
 
@@ -219,7 +244,7 @@ export function MobileNav({ open, onOpenChange, onScan, ...props }) {
           <span className="text-sm font-semibold tracking-tight">Sheehan</span>
           <span className="truncate text-xs text-sidebar-muted">IT Stock Scanner</span>
         </span>
-        <SyncIndicator snap={props.sync} onUnlock={props.onUnlock} />
+        <SyncIndicator snap={props.sync} />
         {props.view !== 'scanner' && (
           <button
             type="button"
@@ -254,10 +279,13 @@ export function MobileNav({ open, onOpenChange, onScan, ...props }) {
               close()
               props.onOpenItem(id)
             }}
-            onUnlock={() => {
-              close()
-              props.onUnlock()
-            }}
+            onLogout={
+              props.onLogout &&
+              (() => {
+                close()
+                props.onLogout()
+              })
+            }
           />
         )}
       </dialog>

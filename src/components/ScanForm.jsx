@@ -44,21 +44,31 @@ const COPY = {
   },
 }
 
+/** What the fields start with: the scan, plus the name and location remembered from the last save. */
+function startValues(pending, prefs) {
+  return {
+    serial: pending.serial,
+    name: prefs.name ?? '',
+    user: '',
+    model: pending.model,
+    color: pending.color,
+    location: prefs.location ?? '',
+    note: '',
+  }
+}
+
 /**
  * The item form shown after a scan, a typed serial or a photo. `pending` is
- * { serial, model, color, source: 'camera' | 'manual' | 'photo', photoUrl? }.
- * The serial is required, except with a photo, which already holds it.
- * `onSave(details)` may return a promise; the form stays busy until it settles.
+ * { serial, model, color, source: 'camera' | 'manual' | 'photo', photoUrl?, values? }, where
+ * `values` are fields restored from a draft. The serial is required, except with a photo,
+ * which already holds it. `onSave(details)` may return a promise; the form stays busy until it
+ * settles. `onChange(values)` runs on every edit, so the page can keep a draft.
  */
-export default function ScanForm({ pending, scans, onSave, onDiscard }) {
+export default function ScanForm({ pending, scans, onSave, onDiscard, onChange }) {
   const [prefs] = useState(loadPrefs)
-  const [serial, setSerial] = useState(pending.serial)
-  const [name, setName] = useState(prefs.name ?? '')
-  const [user, setUser] = useState('')
-  const [model, setModel] = useState(pending.model)
-  const [color, setColor] = useState(pending.color)
-  const [location, setLocation] = useState(prefs.location ?? '')
-  const [note, setNote] = useState('')
+  const [initial] = useState(() => startValues(pending, prefs))
+  const [values, setValues] = useState(() => ({ ...initial, ...pending.values }))
+  const { serial, name, user, model, color, location, note } = values
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -67,15 +77,13 @@ export default function ScanForm({ pending, scans, onSave, onDiscard }) {
   const serialRequired = !isPhoto
   const cleanSerial = serial.trim()
   const existing = cleanSerial && scans.find((s) => s.serial?.toLowerCase() === cleanSerial.toLowerCase())
-  const dirty =
-    isPhoto ||
-    serial !== pending.serial ||
-    name !== (prefs.name ?? '') ||
-    user !== '' ||
-    model !== pending.model ||
-    color !== pending.color ||
-    location !== (prefs.location ?? '') ||
-    note !== ''
+  const dirty = isPhoto || Object.keys(initial).some((key) => values[key] !== initial[key])
+
+  const set = (key) => (value) => {
+    const next = { ...values, [key]: value }
+    setValues(next)
+    onChange?.(next)
+  }
 
   // Esc, the X and a backdrop tap ask first once something was typed (or a photo taken). The Discard button doesn't.
   const requestClose = () => (dirty ? setConfirmDiscard(true) : onDiscard())
@@ -99,8 +107,8 @@ export default function ScanForm({ pending, scans, onSave, onDiscard }) {
     }
   }
 
-  const text = (value, set, props = {}) => (p) => (
-    <Input {...p} value={value} onChange={(e) => set(e.target.value)} autoComplete="off" {...props} />
+  const text = (key, props = {}) => (p) => (
+    <Input {...p} value={values[key]} onChange={(e) => set(key)(e.target.value)} autoComplete="off" {...props} />
   )
 
   return (
@@ -133,7 +141,7 @@ export default function ScanForm({ pending, scans, onSave, onDiscard }) {
                 <Input
                   {...p}
                   value={serial}
-                  onChange={(e) => setSerial(e.target.value.toUpperCase())}
+                  onChange={(e) => set('serial')(e.target.value.toUpperCase())}
                   className="h-12 font-mono text-xl font-semibold tracking-wide sm:text-xl pointer-coarse:h-12"
                   placeholder={isPhoto ? 'e.g. 5CG1234XYZ' : undefined}
                   autoComplete="off"
@@ -153,28 +161,28 @@ export default function ScanForm({ pending, scans, onSave, onDiscard }) {
           )}
 
           <Field id="scan-name" label="Name" hint="Remembered on this device for the next scan.">
-            {text(name, setName, { placeholder: 'e.g. Dell Latitude laptop', 'data-autofocus': !isPhoto || undefined })}
+            {text('name', { placeholder: 'e.g. Dell Latitude laptop', 'data-autofocus': !isPhoto || undefined })}
           </Field>
 
           <Field id="scan-user" label="User" optional hint="The person who uses this item. Leave it blank if it’s in stock.">
-            {text(user, setUser, { placeholder: 'e.g. Juan Dela Cruz' })}
+            {text('user', { placeholder: 'e.g. Juan Dela Cruz' })}
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field id="scan-model" label="Model">
-              {text(model, setModel, { placeholder: 'e.g. 5420' })}
+              {text('model', { placeholder: 'e.g. 5420' })}
             </Field>
             <Field id="scan-color" label="Color">
-              {text(color, setColor, { placeholder: 'e.g. Black' })}
+              {text('color', { placeholder: 'e.g. Black' })}
             </Field>
           </div>
 
           <Field id="scan-location" label="Location" optional hint="Remembered on this device for the next scan.">
-            {text(location, setLocation, { placeholder: 'e.g. Stockroom B, shelf 3' })}
+            {text('location', { placeholder: 'e.g. Stockroom B, shelf 3' })}
           </Field>
 
           <Field id="scan-note" label="Note" optional>
-            {text(note, setNote, { placeholder: 'e.g. Charger missing', autoComplete: 'off', spellCheck: true })}
+            {text('note', { placeholder: 'e.g. Charger missing', autoComplete: 'off', spellCheck: true })}
           </Field>
         </div>
       </Dialog>

@@ -116,28 +116,98 @@ describe('createStockSync', () => {
     expect(second.snap()).toMatchObject({ state: 'ok', pending: 0 })
   })
 
-  it('locks on a wrong password and carries on after unlocking', async () => {
+  it('starts logged out when there is no password yet, and sends nothing', async () => {
+    const { stock, sheet, snap } = setup({ needsPassword: () => true })
+    expect(snap()).toMatchObject({ state: 'locked', error: '' })
+    await stock.sync()
+    expect(sheet.calls).toEqual([])
+  })
+
+  it('logs in only with the right password', async () => {
     const savePassword = vi.fn()
-    const { stock, sheet, snap } = setup({ savePassword })
+    const sheet = fakeSheet()
+    const api = sheet.api.getMockImplementation()
+    let right = false
+    sheet.api.mockImplementation((fn, ...args) => (right ? api(fn, ...args) : Promise.reject(err('Wrong password.', { auth: true }))))
+    const { stock, snap } = setup({ sheet, savePassword, needsPassword: () => true })
+
+    await expect(stock.login('nope')).rejects.toMatchObject({ auth: true })
+    expect(savePassword).not.toHaveBeenCalled() // a wrong password is never remembered
+    expect(snap().state).toBe('locked')
+
+    right = true
+    await stock.login('right')
+    expect(savePassword).toHaveBeenLastCalledWith('right')
+    expect(snap().state).not.toBe('locked')
+    await stock.sync()
+    expect(snap()).toMatchObject({ state: 'ok', loaded: true })
+  })
+
+  it('does not log in when the password can’t be checked', async () => {
+    const savePassword = vi.fn()
+    const { stock, sheet, snap } = setup({ savePassword, needsPassword: () => true })
+    sheet.fail(err('Can’t reach the server.', { offline: true }))
+    await expect(stock.login('maybe')).rejects.toMatchObject({ offline: true })
+    expect(savePassword).not.toHaveBeenCalled()
+    expect(snap().state).toBe('locked')
+  })
+
+  it('logs out when the password is changed, keeping changes for the next login', async () => {
+    const { stock, sheet, snap } = setup()
     sheet.fail(err('Wrong password.', { auth: true }))
     stock.add(scan('c1'))
     await stock.sync()
-    expect(snap()).toMatchObject({ state: 'locked', lockId: 1, pending: 1 })
-
-    await expect(stock.unlock('nope')).rejects.toThrow('Wrong password.')
-    expect(savePassword).toHaveBeenLastCalledWith('')
-    expect(snap().state).toBe('locked')
+    expect(snap()).toMatchObject({ state: 'locked', error: expect.stringMatching(/password was changed/), pending: 1 })
 
     sheet.fail(null)
-    await stock.unlock('right')
-    expect(savePassword).toHaveBeenLastCalledWith('right')
+    await stock.login('new password')
+    await stock.sync()
     expect(sheet.rows.has('c1')).toBe(true)
-    expect(snap()).toMatchObject({ state: 'ok', pending: 0 })
+    expect(snap()).toMatchObject({ state: 'ok', pending: 0, error: '' })
   })
 
-  it('starts locked when there is no password yet', () => {
-    const { snap } = setup({ needsPassword: () => true })
-    expect(snap()).toMatchObject({ state: 'locked', lockId: 1 })
+  it('log out forgets the password and the list, but keeps unsent changes', async () => {
+    const savePassword = vi.fn()
+    const forgetPhotos = vi.fn(async () => {})
+    const { stock, sheet, snap, storage } = setup({ savePassword, forgetPhotos })
+    stock.add(scan('l1', { hasPhoto: true }))
+    await stock.sync() // l1 and its photo are on the sheet
+    sheet.fail(err('Can’t reach the server.', { offline: true }))
+    stock.add(scan('l2', { hasPhoto: true })) // not sent yet
+    await stock.sync()
+
+    stock.logout()
+    expect(savePassword).toHaveBeenLastCalledWith('')
+    expect(snap()).toMatchObject({ state: 'locked', error: '', loaded: false, pending: 2 })
+    expect(storage.getItem('it-stock-sheet-v1')).toBeNull()
+    // The downloaded copy of l1's photo goes; l2's photo still has to be uploaded.
+    expect(forgetPhotos).toHaveBeenLastCalledWith(['l1'])
+
+    sheet.fail(null)
+    await stock.sync() // logged out: nothing is sent
+    expect(sheet.rows.has('l2')).toBe(false)
+    await stock.login('pw')
+    await stock.sync()
+    expect(sheet.rows.get('l2').photoId).toBe('photo-l2')
+  })
+
+  it('a request that finishes after log out does not bring the list back', async () => {
+    const sheet = fakeSheet()
+    const api = sheet.api.getMockImplementation()
+    let release
+    const gate = new Promise((r) => (release = r))
+    sheet.api.mockImplementation(async (fn, ...args) => {
+      if (fn === 'getItems') await gate
+      return api(fn, ...args)
+    })
+    const { stock, snap, storage } = setup({ sheet })
+    const loading = stock.sync()
+    await Promise.resolve()
+    stock.logout()
+    release()
+    await loading
+    expect(snap()).toMatchObject({ state: 'locked', loaded: false })
+    expect(storage.getItem('it-stock-sheet-v1')).toBeNull()
   })
 
   it('uploads the label photo after the item', async () => {

@@ -9,7 +9,7 @@
  * Development (no VITE_REMOTE_API): the list lives in this browser only.
  */
 import { useSyncExternalStore } from 'react'
-import { call, hasPassword, isRemote, setPassword } from './lib/api.js'
+import { PASSWORD_KEY, call, checkPassword, hasPassword, isRemote, setPassword } from './lib/api.js'
 import { deletePhotos, getPhoto } from './photos.js'
 import { SCANS_KEY, itemName, makeId } from './storage.js'
 import { applyOps, itemForSheet, queueOp, removeSent, sortNewestFirst, takeBatch } from './sync.js'
@@ -74,7 +74,8 @@ const isRefusal = (err) => !err.auth && !err.offline && err.status === 400
 
 /**
  * Snapshot states: 'ok' (last request worked), 'busy' (a request is running), 'offline',
- * 'error' (`error` says why) and 'locked' (the app password is missing or wrong).
+ * 'error' (`error` says why) and 'locked' (logged out: no password yet, logged out, or the
+ * password was changed, in which case `error` says so).
  */
 export function createStockSync({
   call: api,
@@ -83,6 +84,8 @@ export function createStockSync({
   forgetPhotos = async () => {}, // async (ids) => removes photos kept on this device
   needsPassword = () => false,
   savePassword = () => {},
+  checkPassword = () => api('getVersion'), // async (password) => throws when it's wrong
+  passwordKey = null, // storage key of the password, to follow logins and log-outs in other tabs
   isOnline = () => globalThis.navigator?.onLine !== false,
   lock = (fn) => fn(), // runs `fn` while no other tab is sending
   newKey = makeId,
@@ -97,8 +100,7 @@ export function createStockSync({
   let sheetGen = 0 // bumps whenever `sheet` is replaced, so a slower, older read can't overwrite it
   let locked = needsPassword()
   let state = locked ? 'locked' : 'ok'
-  let error = locked ? 'Enter the app password.' : ''
-  let lockId = locked ? 1 : 0 // bumps each time the app locks, so screens can ask once per lock
+  let error = ''
   // Notices raised before the screens are listening (the move of old scans at start) wait here.
   const early = []
   let notify = (...args) => early.push(args)
@@ -112,7 +114,7 @@ export function createStockSync({
   }
   let snap
   const emit = () => {
-    snap = { mode: 'remote', scans: scansNow(), loaded: !!sheet, state, error, pending: outbox.length, lockId }
+    snap = { mode: 'remote', scans: scansNow(), loaded: !!sheet, state, error, pending: outbox.length }
     subs.emit()
   }
   emit()
@@ -191,6 +193,7 @@ export function createStockSync({
   /* ---------- Talking to the sheet ---------- */
 
   function setSheet(next) {
+    if (locked) return // logged out while the request was on its way: don't keep the list
     const before = sheet?.items ?? []
     sheet = { items: next.items, version: next.version }
     sheetGen++
@@ -205,7 +208,7 @@ export function createStockSync({
   async function sendOutbox() {
     let sent = 0
     for (;;) {
-      const batch = takeBatch(store.read(OUTBOX_KEY, outbox))
+      const batch = locked ? null : takeBatch(store.read(OUTBOX_KEY, outbox))
       if (!batch) return sent
       sent++
       if (batch.kind === 'changes') {
@@ -246,7 +249,7 @@ export function createStockSync({
       if (version === sheet.version) return
     }
     const res = await api('getItems')
-    if (gen !== sheetGen) return // a newer copy arrived meanwhile
+    if (gen !== sheetGen || locked) return // a newer copy arrived meanwhile, or logged out
     setSheet(res)
     emit()
   }
@@ -272,17 +275,21 @@ export function createStockSync({
           await lock(async () => {
             const sent = await sendOutbox()
             // A send answers with the whole list, so there is nothing more to fetch.
-            if ((wantPull && !sent) || !sheet) await pull()
+            if (!locked && ((wantPull && !sent) || !sheet)) await pull()
             wantPull = false
           })
-        } while (again)
-        retryMs = 0
-        setState('ok')
+        } while (again && !locked)
+        if (!locked) {
+          retryMs = 0
+          setState('ok')
+        }
       } catch (err) {
+        if (locked) return // logged out meanwhile; the error no longer matters
         if (err.auth) {
+          // The password was changed: back to the login screen. Changes made here wait for it.
+          savePassword('')
           locked = true
-          lockId++
-          setState('locked', err.message)
+          setState('locked', 'The app password was changed. Log in with the new one.')
         } else {
           setState(err.offline || !isOnline() ? 'offline' : 'error', err.message || String(err))
           retryMs = Math.min(Math.max(retryMs * 2, 5000), MAX_RETRY_MS)
@@ -301,21 +308,42 @@ export function createStockSync({
     return pump()
   }
 
-  /** Checks the password with the sheet. Throws (and forgets it) when it's wrong. */
-  async function unlock(password) {
+  /**
+   * Logs in: checks the password with the server and only then remembers it. Throws when it's
+   * wrong (`err.auth`) or can't be checked (`err.offline`, or the server's own message). The list
+   * loads in the background afterwards.
+   */
+  async function login(password) {
+    await checkPassword(password)
     savePassword(password)
-    try {
-      await api('getVersion')
-    } catch (err) {
-      if (err.auth) {
-        savePassword('')
-        throw err
-      }
-      // Offline: the password can't be checked yet. Keep it; the next sync will tell.
-    }
+    unlockHere()
+  }
+
+  function unlockHere() {
     locked = false
     setState('ok')
-    return sync()
+    sync()
+  }
+
+  /**
+   * Logs out on this device: forgets the password, the copy of the list and downloaded photos.
+   * Changes that haven't reached the sheet yet stay, and are sent after the next login here.
+   */
+  function logout() {
+    const uploading = new Set(outbox.filter((o) => o.op === 'photo').map((o) => o.id))
+    const copies = (sheet?.items ?? []).filter((s) => s.hasPhoto && !uploading.has(s.id)).map((s) => s.id)
+    savePassword('')
+    locked = true
+    sheet = null
+    sheetGen++
+    store.remove(SHEET_KEY)
+    if (timer) clearTimer(timer)
+    timer = null
+    retryMs = 0
+    if (copies.length) forgetPhotos(copies).catch(() => {})
+    state = 'locked'
+    error = ''
+    emit()
   }
 
   let started = false
@@ -340,13 +368,20 @@ export function createStockSync({
     }
     document.addEventListener('visibilitychange', lookSoon)
     window.addEventListener('focus', lookSoon)
-    // Another tab sent or queued changes.
     window.addEventListener('storage', (e) => {
-      if (e.key !== null && e.key !== SHEET_KEY && e.key !== OUTBOX_KEY) return
-      sheet = store.read(SHEET_KEY, null)
-      sheetGen++
-      outbox = store.read(OUTBOX_KEY, [])
-      emit()
+      // Logged in or out in another tab.
+      if (e.key === null || e.key === passwordKey) {
+        const loggedOut = needsPassword()
+        if (loggedOut && !locked) logout()
+        else if (!loggedOut && locked) unlockHere()
+      }
+      // Another tab sent or queued changes.
+      if (e.key === null || e.key === SHEET_KEY || e.key === OUTBOX_KEY) {
+        sheet = locked ? null : store.read(SHEET_KEY, null)
+        sheetGen++
+        outbox = store.read(OUTBOX_KEY, [])
+        emit()
+      }
     })
   }
 
@@ -360,7 +395,8 @@ export function createStockSync({
     update,
     remove,
     sync,
-    unlock,
+    login,
+    logout,
     migrate,
     /** `fn(message, type)` shows a notice, e.g. the toast. */
     setNotify(fn) {
@@ -375,7 +411,7 @@ export function createLocalStock({ storage = globalThis.localStorage, forgetPhot
   const store = reader(storage)
   const subs = listeners()
   let scans = store.read(SCANS_KEY, [])
-  let snap = { mode: 'local', scans, loaded: true, state: 'ok', error: '', pending: 0, lockId: 0 }
+  let snap = { mode: 'local', scans, loaded: true, state: 'ok', error: '', pending: 0 }
 
   const set = (next) => {
     scans = next
@@ -397,7 +433,8 @@ export function createLocalStock({ storage = globalThis.localStorage, forgetPhot
       if (withPhoto.length) forgetPhotos(withPhoto).catch(() => {})
     },
     sync: () => Promise.resolve(),
-    unlock: () => Promise.resolve(),
+    login: () => Promise.resolve(),
+    logout() {},
     migrate: () => 0,
     setNotify() {},
   }
@@ -423,11 +460,13 @@ export const stock = isRemote
       forgetPhotos: deletePhotos,
       needsPassword: () => !hasPassword(),
       savePassword: setPassword,
+      checkPassword,
+      passwordKey: PASSWORD_KEY,
       lock: (fn) => (globalThis.navigator?.locks?.request ? navigator.locks.request('it-stock-sync', fn) : fn()),
     })
   : createLocalStock({ forgetPhotos: deletePhotos })
 
-/** The current list and sync status: { mode, scans, loaded, state, error, pending, lockId }. */
+/** The current list and sync status: { mode, scans, loaded, state, error, pending }. */
 export function useStock() {
   return useSyncExternalStore(stock.subscribe, stock.getSnapshot)
 }

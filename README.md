@@ -41,14 +41,20 @@ In the Vercel project, go to **Settings → Environment Variables** and add:
 | -------------- | ------------------------------------------------------------------ |
 | `GAS_URL`      | The Web app URL from step 1.5 (ends in `/exec`)                    |
 | `SYNC_TOKEN`   | The token from step 1.3                                            |
-| `APP_PASSWORD` | A long password people type once on each device to open the list |
+| `APP_PASSWORD` | The app's login password. Use a long one                           |
 
 Then redeploy. The variables are only read on the server. Don't give any of them a `VITE_` prefix,
 because that would put them inside the web page for anyone to read.
 
-### 3. Each phone or computer
+### 3. Logging in
 
-Open the app and enter the app password once. The device remembers it.
+The app opens on a login screen that asks only for the password (`APP_PASSWORD`). There are no
+user names: everyone on the team uses the same password. A device stays logged in until someone
+taps **Log out** (the arrow icon at the bottom of the sidebar, also in the phone's menu).
+
+Logging out forgets the password, the copy of the stock list and the downloaded photos on that
+device. Changes that haven't reached the sheet yet are kept and saved after the next login there;
+the app warns before logging out with such changes.
 
 Scans saved in a browser before the sheet was connected are added to the sheet automatically the
 first time that browser opens the connected app.
@@ -80,8 +86,10 @@ Version: New version → Deploy**. The URL stays the same, so Vercel needs no ch
 
 - To revoke access (say, the token leaked), run `generateSyncToken` again and put the new token in
   Vercel. The old one stops working at once. `removeSyncToken` turns access off completely.
-- To change the app password, change `APP_PASSWORD` in Vercel and redeploy. Every device asks for
-  the new one.
+- To change the app password, change `APP_PASSWORD` in Vercel and redeploy. Every device goes back
+  to the login screen and asks for the new one.
+- A wrong password is answered after a one-second pause, to slow down guessing. Still, use a long
+  password: it is the only thing between the internet and the stock list.
 - `SYNC_TOKEN` and `SPREADSHEET_URL` at the top of `code.gs` should stay empty in this repo. Fill
   them in only inside the Apps Script editor, if at all.
 

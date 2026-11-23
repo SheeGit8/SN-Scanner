@@ -5,6 +5,7 @@ import { PageHeader } from './Layout.jsx'
 import ScanForm from './ScanForm.jsx'
 import { makeId, savePrefs } from '../storage.js'
 import { savePhoto } from '../photos.js'
+import { drafts } from '../drafts.js'
 import { photoFromFile, photoFromVideo } from '../lib/image.js'
 import { useToast } from '../lib/toast.js'
 import { cn } from '../lib/utils.js'
@@ -78,16 +79,35 @@ export default function PhotoCapture({ scans, onSave, onHistory }) {
   const photoUrl = pending?.photoUrl
   useEffect(() => () => photoUrl && URL.revokeObjectURL(photoUrl), [photoUrl])
 
-  function openForm(blob) {
-    setPending({
-      id: makeId(),
-      serial: '',
-      model: '',
-      color: '',
-      source: 'photo',
-      photo: blob,
-      photoUrl: URL.createObjectURL(blob),
+  // An item that was being added when the page was refreshed or closed: reopen it as it was.
+  useEffect(() => {
+    const draft = drafts.load('photo')
+    if (!draft) return
+    let cancelled = false
+    drafts.photo('photo').then((blob) => {
+      if (cancelled) return
+      setPending({ ...draft.pending, values: draft.values, ...(blob && { photo: blob, photoUrl: URL.createObjectURL(blob) }) })
+      toast(
+        blob
+          ? 'Restored the item you were adding.'
+          : 'Restored the details you were adding, but not the photo. Save without it, or discard and take it again.',
+        { type: 'info' },
+      )
     })
+    return () => {
+      cancelled = true
+    }
+  }, [toast])
+
+  function openForm(blob) {
+    const next = { id: makeId(), serial: '', model: '', color: '', source: 'photo' }
+    drafts.start('photo', next, blob)
+    setPending({ ...next, photo: blob, photoUrl: URL.createObjectURL(blob) })
+  }
+
+  function discard() {
+    drafts.clear('photo')
+    setPending(null)
   }
 
   async function takePhoto() {
@@ -125,11 +145,13 @@ export default function PhotoCapture({ scans, onSave, onHistory }) {
 
   async function handleSave(details) {
     const id = makeId()
-    let stored = true
-    try {
-      await savePhoto(id, pending.photo)
-    } catch {
-      stored = false // keep the item anyway; losing the typed details would be worse
+    let stored = !!pending.photo // false when a restored draft lost its photo
+    if (stored) {
+      try {
+        await savePhoto(id, pending.photo)
+      } catch {
+        stored = false // keep the item anyway; losing the typed details would be worse
+      }
     }
     onSave({
       id,
@@ -142,14 +164,16 @@ export default function PhotoCapture({ scans, onSave, onHistory }) {
     setSavedCount((n) => n + 1)
 
     const label = [details.serial, details.name].filter(Boolean).join(' · ')
-    if (!stored) {
+    if (!pending.photo) {
+      toast(`Saved ${label || 'the item'}, without a photo.`)
+    } else if (!stored) {
       toast(`Saved ${label || 'the item'}, but the photo couldn’t be stored on this device.`, { type: 'error' })
     } else if (!details.serial) {
       toast(`Saved ${label || 'the photo'}. Add the serial number later in the spreadsheet.`)
     } else {
       toast(`Saved ${label}.`)
     }
-    setPending(null)
+    discard() // the item is saved, so the draft has done its job
   }
 
   const cameraBlocked = BLOCKED.includes(status)
@@ -274,7 +298,14 @@ export default function PhotoCapture({ scans, onSave, onHistory }) {
       </div>
 
       {pending && (
-        <ScanForm key={pending.id} pending={pending} scans={scans} onSave={handleSave} onDiscard={() => setPending(null)} />
+        <ScanForm
+          key={pending.id}
+          pending={pending}
+          scans={scans}
+          onSave={handleSave}
+          onDiscard={discard}
+          onChange={(values) => drafts.update('photo', pending.id, values)}
+        />
       )}
     </div>
   )

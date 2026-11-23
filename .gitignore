@@ -26,3 +26,7 @@ dist-ssr
 # Secrets and Vercel's local files
 .env
 .vercel
+
+.env.production
+
+

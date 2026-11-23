@@ -6,10 +6,12 @@ import PhotoCapture from './components/PhotoCapture.jsx'
 import History from './components/History.jsx'
 import Spreadsheet from './components/Spreadsheet.jsx'
 import ItemDrawer from './components/ItemDrawer.jsx'
-import { FirstLoad, UnlockDialog } from './components/SyncStatus.jsx'
-import { ToastProvider } from './components/ui.jsx'
+import { FirstLoad } from './components/SyncStatus.jsx'
+import LoginScreen from './components/Login.jsx'
+import { ConfirmDialog, ToastProvider } from './components/ui.jsx'
 import { makeId } from './storage.js'
 import { stock, useStock } from './stock.js'
+import { DRAFT_PAGES, drafts } from './drafts.js'
 import { isRemote } from './lib/api.js'
 import { useTheme } from './lib/theme.js'
 import { useToast } from './lib/toast.js'
@@ -25,9 +27,15 @@ const viewFromHash = () => {
 export default function App() {
   return (
     <ToastProvider>
-      <Shell />
+      <Gate />
     </ToastProvider>
   )
+}
+
+/** With the Google Sheet connected, nothing opens until someone logs in with the app password. */
+function Gate() {
+  const snap = useStock()
+  return snap.state === 'locked' ? <LoginScreen snap={snap} /> : <Shell />
 }
 
 function Shell() {
@@ -41,16 +49,14 @@ function Shell() {
   const mainRef = useRef(null)
   const toast = useToast()
 
-  // The password prompt opens by itself once each time the sheet refuses the password, and
-  // again whenever someone taps Unlock.
-  const [dismissedLock, setDismissedLock] = useState(null)
-  const [unlockAsked, setUnlockAsked] = useState(false)
-  const unlockOpen = snap.state === 'locked' && (unlockAsked || dismissedLock !== snap.lockId)
-  const askUnlock = () => setUnlockAsked(true)
-  const closeUnlock = () => {
-    setDismissedLock(snap.lockId)
-    setUnlockAsked(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+  const logout = () => {
+    setConfirmLogout(false)
+    toast('Logged out.')
+    stock.logout() // the login screen takes over
   }
+  // Changes that haven't reached the sheet yet are kept for the next login, but say so first.
+  const requestLogout = () => (snap.pending ? setConfirmLogout(true) : logout())
 
   useEffect(() => {
     stock.setNotify((message, type) => toast(message, type ? { type } : undefined))
@@ -67,6 +73,13 @@ function Shell() {
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // An item was being added when the app was refreshed or closed: go back to its page, which reopens
+  // it. Opening the Scanner or Photo page directly stays there; each page restores its own draft.
+  useEffect(() => {
+    const page = drafts.latestPage()
+    if (page && !DRAFT_PAGES.includes(viewFromHash())) window.location.hash = page
   }, [])
 
   const setView = (next) => {
@@ -113,7 +126,7 @@ function Shell() {
 
   let content
   if (waiting) {
-    content = <FirstLoad snap={snap} onUnlock={askUnlock} />
+    content = <FirstLoad snap={snap} />
   } else if (view === 'scanner') {
     content = <Scanner scans={scans} onSave={addScan} onHistory={() => setView('history')} />
   } else if (view === 'photo') {
@@ -154,7 +167,7 @@ function Shell() {
     dark,
     onToggleTheme: toggleTheme,
     sync: snap,
-    onUnlock: askUnlock,
+    onLogout: isRemote ? requestLogout : undefined,
   }
 
   return (
@@ -211,7 +224,15 @@ function Shell() {
         />
       )}
 
-      {isRemote && <UnlockDialog open={unlockOpen} onClose={closeUnlock} pending={snap.pending} />}
+      <ConfirmDialog
+        open={confirmLogout}
+        title="Log out with unsaved changes?"
+        description={`${snap.pending === 1 ? '1 change hasn’t' : `${snap.pending} changes haven’t`} reached the Google Sheet yet. They stay on this device and are saved the next time someone logs in here.`}
+        cancelLabel="Stay logged in"
+        confirmLabel="Log out"
+        onCancel={() => setConfirmLogout(false)}
+        onConfirm={logout}
+      />
     </div>
   )
 }

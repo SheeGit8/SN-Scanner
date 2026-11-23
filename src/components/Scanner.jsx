@@ -15,6 +15,7 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 import { PageHeader } from './Layout.jsx'
 import ScanForm from './ScanForm.jsx'
 import { makeId, savePrefs } from '../storage.js'
+import { drafts } from '../drafts.js'
 import { createRepeatGate, extractField, extractSerial, getWorker, recognize } from '../ocr.js'
 import { eraseBoxes } from '../preprocess.js'
 import { useToast } from '../lib/toast.js'
@@ -89,15 +90,30 @@ function grabFrame(video, canvas) {
   return true
 }
 
+/** The scan that was being checked when the page was refreshed or closed, to reopen as it was. */
+function restoredPending() {
+  const draft = drafts.load('scanner')
+  return draft && { ...draft.pending, values: draft.values }
+}
+
+/** Opens the form for a scan, and keeps it as a draft until it is saved or discarded. */
+function openPending(setPending, next) {
+  drafts.start('scanner', next)
+  setPending(next)
+}
+
 export default function Scanner({ scans, onSave, onHistory }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const pausedRef = useRef(false)
+  const [restored] = useState(restoredPending)
+  // Scanning stays paused while the form is open, including one restored from a draft.
+  const pausedRef = useRef(!!restored)
+  const announcedRef = useRef(false)
   // Keeps a label that is still in view from re-opening the dialog after Save/Discard.
   const [gate] = useState(() => createRepeatGate(2))
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState(() => (canUseCamera() ? 'starting' : 'unsupported'))
-  const [pending, setPending] = useState(null)
+  const [pending, setPending] = useState(restored)
   const [manual, setManual] = useState('')
   const [savedCount, setSavedCount] = useState(0)
   const toast = useToast()
@@ -118,7 +134,7 @@ export default function Scanner({ scans, onSave, onHistory }) {
     pausedRef.current = true
     navigator.vibrate?.(60)
     setStatus('paused')
-    setPending({
+    openPending(setPending, {
       id: makeId(),
       serial,
       model: extractField(text, ['model', 'model no', 'mdl']) ?? '',
@@ -127,6 +143,12 @@ export default function Scanner({ scans, onSave, onHistory }) {
     })
     return true
   }, [gate])
+
+  useEffect(() => {
+    if (!restored || announcedRef.current) return
+    announcedRef.current = true
+    toast('Restored the scan you were checking.', { type: 'info' })
+  }, [restored, toast])
 
   useEffect(() => {
     if (!canUseCamera()) return
@@ -202,6 +224,7 @@ export default function Scanner({ scans, onSave, onHistory }) {
   function resume(serial) {
     gate.hold(serial)
     pausedRef.current = false
+    drafts.clear('scanner')
     setPending(null)
     setStatus((s) => (s === 'paused' ? 'live' : s))
   }
@@ -212,7 +235,7 @@ export default function Scanner({ scans, onSave, onHistory }) {
     if (!value) return
     pausedRef.current = true
     setStatus((s) => (s === 'live' ? 'paused' : s))
-    setPending({ id: makeId(), serial: value, model: '', color: '', source: 'manual' })
+    openPending(setPending, { id: makeId(), serial: value, model: '', color: '', source: 'manual' })
     setManual('')
   }
 
@@ -405,6 +428,7 @@ export default function Scanner({ scans, onSave, onHistory }) {
           scans={scans}
           onSave={handleSave}
           onDiscard={() => resume(pending.serial)}
+          onChange={(values) => drafts.update('scanner', pending.id, values)}
         />
       )}
     </div>
