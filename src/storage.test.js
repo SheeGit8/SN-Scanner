@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { itemName, csvRow, CSV_HEADER, searchValues } from './storage.js'
+import { itemName, csvRow, CSV_HEADER, searchValues, inLocation, locationGroups, locationKey } from './storage.js'
 
 describe('itemName', () => {
   it('falls back to legacy type', () => expect(itemName({ type: 'Laptop' })).toBe('Laptop'))
@@ -43,4 +43,37 @@ describe('searchValues', () => {
     expect(searchValues({ serial: '1', name: 'Dell', user: 'Ana Reyes' })).toContain('Ana Reyes'))
 
   it('uses the legacy type as the name', () => expect(searchValues({ type: 'Monitor' })).toContain('Monitor'))
+})
+
+describe('location tabs', () => {
+  const at = (location, id = location) => ({ id, location })
+
+  it('treats case and extra spaces as the same place', () => {
+    expect(locationKey('  Stockroom   B ')).toBe('stockroom b')
+    expect(locationKey(undefined)).toBe('')
+  })
+
+  it('groups by place, sorted by name, with no location last', () => {
+    const scans = [at('Office 10'), at(''), at('office 2'), at('Office 2', 'x'), at('Annex'), at(undefined, 'y'), at('  ', 'z')]
+    expect(locationGroups(scans)).toEqual([
+      { key: 'annex', label: 'Annex', count: 1 },
+      { key: 'office 2', label: 'office 2', count: 2 },
+      { key: 'office 10', label: 'Office 10', count: 1 },
+      { key: '', label: 'No location', count: 3 },
+    ])
+  })
+
+  it('shows a place with its most used spelling', () => {
+    const scans = [at('stockroom b', 1), at('Stockroom B', 2), at('Stockroom  B', 3)]
+    expect(locationGroups(scans)[0]).toMatchObject({ label: 'Stockroom B', count: 3 })
+  })
+
+  it('has no groups for an empty list', () => expect(locationGroups([])).toEqual([]))
+
+  it('filters to one place, or keeps all for null', () => {
+    const scans = [at('Annex'), at('ANNEX ', 'b'), at('Office'), at('', 'n')]
+    expect(inLocation(scans, 'annex').map((s) => s.id)).toEqual(['Annex', 'b'])
+    expect(inLocation(scans, '').map((s) => s.id)).toEqual(['n'])
+    expect(inLocation(scans, null)).toBe(scans)
+  })
 })

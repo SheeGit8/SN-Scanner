@@ -9,7 +9,7 @@ import ItemDrawer from './components/ItemDrawer.jsx'
 import { FirstLoad } from './components/SyncStatus.jsx'
 import LoginScreen from './components/Login.jsx'
 import { ConfirmDialog, ToastProvider } from './components/ui.jsx'
-import { makeId } from './storage.js'
+import { locationKey, makeId } from './storage.js'
 import { stock, useStock } from './stock.js'
 import { DRAFT_PAGES, drafts } from './drafts.js'
 import { isRemote } from './lib/api.js'
@@ -45,6 +45,8 @@ function Shell() {
   const [selectedId, setSelectedId] = useState(null)
   const [navOpen, setNavOpen] = useState(false)
   const [sheetFocus, setSheetFocus] = useState(null)
+  // The location tab picked on History or the Spreadsheet; the two share it. Null is All.
+  const [location, setLocation] = useState(null)
   const [dark, toggleTheme] = useTheme()
   const mainRef = useRef(null)
   const toast = useToast()
@@ -92,7 +94,7 @@ function Shell() {
     stock.remove(ids)
     if (ids.includes(selectedId)) setSelectedId(null)
   }
-  const addBlankRow = () => {
+  const addBlankRow = (fields = {}) => {
     const scan = {
       id: makeId(),
       serial: '',
@@ -104,6 +106,7 @@ function Shell() {
       note: '',
       source: 'manual',
       scannedAt: new Date().toISOString(),
+      ...fields,
     }
     addScan(scan)
     return scan.id
@@ -114,6 +117,9 @@ function Shell() {
     setNavOpen(false)
   }
   const openInSheet = (id) => {
+    // Show the row: stay on its location's tab, else switch to All.
+    const scan = scans.find((s) => s.id === id)
+    setLocation((key) => (key === null || (scan && locationKey(scan.location) === key) ? key : null))
     setSelectedId(null)
     setSheetFocus({ id, at: makeId() })
     setView('sheet')
@@ -132,13 +138,24 @@ function Shell() {
   } else if (view === 'photo') {
     content = <PhotoCapture scans={scans} onSave={addScan} onHistory={() => setView('history')} />
   } else if (view === 'history') {
-    content = <History scans={scans} onDelete={(id) => deleteScans([id])} onOpen={openItem} onScan={() => setView('scanner')} />
+    content = (
+      <History
+        scans={scans}
+        location={location}
+        onLocationChange={setLocation}
+        onDelete={(id) => deleteScans([id])}
+        onOpen={openItem}
+        onScan={() => setView('scanner')}
+      />
+    )
   } else if (isSheet) {
     content = (
       <Spreadsheet
         key={sheetFocus?.at ?? 'sheet'}
         scans={scans}
         focusId={sheetFocus?.id}
+        location={location}
+        onLocationChange={setLocation}
         onUpdate={updateScan}
         onAddRow={addBlankRow}
         onDeleteMany={deleteScans}
@@ -153,6 +170,10 @@ function Shell() {
         onPhoto={() => setView('photo')}
         onSheet={() => setView('sheet')}
         onHistory={() => setView('history')}
+        onLocation={(key) => {
+          setLocation(key)
+          setView('history')
+        }}
         onOpen={openItem}
       />
     )

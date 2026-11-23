@@ -1,27 +1,25 @@
-import { ArrowRight, CalendarDays, Camera, MapPin, Package, ScanText, Sheet } from 'lucide-react'
+import { ArrowRight, CalendarDays, Camera, ChevronRight, MapPin, Package, ScanText, Sheet } from 'lucide-react'
 import { Button, Card, CardTitle } from './ui.jsx'
 import { EmptyState, PageHeader, StatCard } from './Layout.jsx'
 import ScanRow from './ScanRow.jsx'
-import { formatLongDate, formatRelative, isSameDay } from '../storage.js'
+import { formatLongDate, formatRelative, isSameDay, locationGroups } from '../storage.js'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, onOpen }) {
+/** `onLocation(key)` opens History on that location's tab. */
+export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, onLocation, onOpen }) {
   const now = new Date()
   const todayCount = scans.filter((s) => isSameDay(new Date(s.scannedAt), now)).length
   const weekCount = scans.filter((s) => now.getTime() - new Date(s.scannedAt).getTime() < WEEK_MS).length
   const missingSerial = scans.filter((s) => !s.serial?.trim()).length
   const latest = scans.reduce((a, s) => (!a || s.scannedAt > a.scannedAt ? s : a), null)
 
-  const byLocation = new Map()
-  for (const s of scans) {
-    const key = s.location?.trim() || ''
-    byLocation.set(key, (byLocation.get(key) ?? 0) + 1)
-  }
-  const locations = [...byLocation.entries()].sort((a, b) => b[1] - a[1])
-  const namedLocations = locations.filter(([name]) => name).length
+  // Same grouping as the location tabs, so the counts match. Busiest first.
+  const locations = locationGroups(scans).sort((a, b) => b.count - a.count)
+  const namedLocations = locations.filter((g) => g.key).length
+  const noLocation = locations.find((g) => !g.key)?.count ?? 0
   const topLocations = locations.slice(0, 6)
-  const maxCount = topLocations[0]?.[1] ?? 1
+  const maxCount = topLocations[0]?.count ?? 1
 
   return (
     <div className="grid gap-6">
@@ -65,11 +63,7 @@ export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, 
           label="Locations"
           value={namedLocations}
           icon={MapPin}
-          hint={
-            byLocation.get('')
-              ? `${byLocation.get('')} ${byLocation.get('') === 1 ? 'item' : 'items'} with no location`
-              : 'Every item has a location'
-          }
+          hint={noLocation ? `${noLocation} ${noLocation === 1 ? 'item' : 'items'} with no location` : 'Every item has a location'}
         />
       </div>
 
@@ -107,16 +101,27 @@ export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, 
             <div className="border-b px-5 py-4">
               <CardTitle id="loc-heading">Items by location</CardTitle>
             </div>
-            <ul className="grid gap-3 px-5 py-4">
-              {topLocations.map(([name, count]) => (
-                <li key={name || '__none'}>
-                  <div className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className={name ? 'truncate' : 'truncate text-muted-foreground italic'}>{name || 'No location'}</span>
-                    <span className="font-mono text-muted-foreground tabular-nums">{count}</span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                    <div className="h-full rounded-full bg-foreground/70" style={{ width: `${(count / maxCount) * 100}%` }} />
-                  </div>
+            <ul className="grid gap-1 px-2 py-2">
+              {topLocations.map(({ key, label, count }) => (
+                <li key={key || '__none'}>
+                  <button
+                    type="button"
+                    onClick={() => onLocation(key)}
+                    className="group w-full rounded-md px-3 py-2 text-left transition-colors duration-150 outline-none hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring"
+                    title={`See the items ${key ? `in ${label}` : 'with no location'}`}
+                  >
+                    <span className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className={key ? 'truncate' : 'truncate text-muted-foreground italic'}>{label}</span>
+                      <span className="flex items-center gap-1 font-mono text-muted-foreground tabular-nums">
+                        {count}
+                        <span className="sr-only">{count === 1 ? ' item' : ' items'}</span>
+                        <ChevronRight className="size-3.5 translate-y-0.5 opacity-50 group-hover:opacity-100" aria-hidden="true" />
+                      </span>
+                    </span>
+                    <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                      <span className="block h-full rounded-full bg-foreground/70" style={{ width: `${(count / maxCount) * 100}%` }} />
+                    </span>
+                  </button>
                 </li>
               ))}
             </ul>

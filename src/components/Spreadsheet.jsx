@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, PanelRightOpen, Plus, Search, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog, Input, Kbd } from './ui.jsx'
-import { downloadCsv, formatDate, formatTime, itemName, methodLabel } from '../storage.js'
+import LocationTabs from './LocationTabs.jsx'
+import { downloadCsv, formatDate, formatTime, inLocation, itemName, locationGroups, locationKey, methodLabel } from '../storage.js'
 import { cn } from '../lib/utils.js'
 import { deletedFrom } from '../lib/api.js'
 import { useToast } from '../lib/toast.js'
@@ -37,25 +38,35 @@ function compareRows(a, b, key) {
   return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' })
 }
 
-export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDeleteMany, onOpenItem }) {
+/**
+ * `location` is the selected sheet tab (a key from locationGroups, or null for All); `onAddRow`
+ * takes the fields a new row starts with.
+ */
+export default function Spreadsheet({ scans, focusId, location, onLocationChange, onUpdate, onAddRow, onDeleteMany, onOpenItem }) {
   const gridRef = useRef(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState({ key: 'scannedAt', dir: 'desc' })
   const [active, setActive] = useState(() => ({ id: focusId ?? scans[0]?.id ?? null, c: 0 }))
   const [editing, setEditing] = useState(null) // { value, from: 'cell' | 'bar' }
+  // The edit last saved or cancelled. Focusing the grid afterwards blurs the cell editor, whose
+  // onBlur still sees that edit; this stops it being saved a second time, or after Escape.
+  const finishedEdit = useRef(null)
   const [selected, setSelected] = useState(() => (focusId ? new Set([focusId]) : new Set()))
   const [anchorId, setAnchorId] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const toast = useToast()
 
+  const places = useMemo(() => locationGroups(scans), [scans])
+  // A tab whose last row was moved or deleted is gone; show All instead.
+  const place = places.find((g) => g.key === location) ?? null
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = q
-      ? scans.filter((s) => COLUMNS.some((col) => cellText(s, col).toLowerCase().includes(q)))
-      : [...scans]
+    const inTab = inLocation(scans, place?.key)
+    const list = q ? inTab.filter((s) => COLUMNS.some((col) => cellText(s, col).toLowerCase().includes(q))) : [...inTab]
     list.sort((a, b) => compareRows(a, b, sort.key) * (sort.dir === 'asc' ? 1 : -1))
     return list
-  }, [scans, query, sort])
+  }, [scans, place?.key, query, sort])
 
   // The active cell is tracked by row id so it survives sorting and filtering.
   let r = rows.findIndex((s) => s.id === active.id)
@@ -86,16 +97,23 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
   }
 
   function commit(move) {
-    if (editing && activeRow && !col.readOnly) {
+    if (editing && editing !== finishedEdit.current && activeRow && !col.readOnly) {
       const next = editing.value.trim()
-      if (next !== activeValue) onUpdate(activeRow.id, { [col.key]: next })
+      if (next !== activeValue) {
+        onUpdate(activeRow.id, { [col.key]: next })
+        // The row leaves this tab; say where it went so it doesn't just seem to vanish.
+        if (col.key === 'location' && place && locationKey(next) !== place.key)
+          toast(next ? `Moved to the ${next} tab.` : 'Moved to the No location tab.')
+      }
     }
+    finishedEdit.current = editing
     setEditing(null)
     if (move) moveTo(r + move[0], c + move[1])
     focusGrid()
   }
 
   function cancelEdit() {
+    finishedEdit.current = editing
     setEditing(null)
     focusGrid()
   }
@@ -193,8 +211,17 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
   }
 
+  function changeTab(key) {
+    if (editing) commit(null)
+    onLocationChange(key)
+    // Rows picked on another tab are out of sight; don't let Delete rows reach them.
+    setSelected(new Set())
+    setConfirmDelete(false)
+  }
+
   function addRow() {
-    const id = onAddRow()
+    // A row added on a location's tab starts at that location, so it stays on the tab.
+    const id = onAddRow(place?.key ? { location: place.label } : {})
     setQuery('')
     setSort({ key: 'scannedAt', dir: 'desc' })
     setActive({ id, c: 0 })
@@ -291,7 +318,12 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
       </div>
 
       {/* Grid */}
-      <div className="relative min-h-0 flex-1 overflow-auto bg-card">
+      <div
+        id="sheet-panel"
+        role={places.length ? 'tabpanel' : undefined}
+        aria-label={place ? `Rows ${place.key ? `in ${place.label}` : 'with no location'}` : 'All rows'}
+        className="relative min-h-0 flex-1 overflow-auto bg-card"
+      >
         <table
           ref={gridRef}
           role="grid"
@@ -376,7 +408,9 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
                 <td colSpan={COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-muted-foreground">
                   {scans.length === 0
                     ? 'No rows yet. Add a row, or scan an item to fill the sheet.'
-                    : `No rows match “${query}”.`}
+                    : place
+                      ? `No rows on the ${place.label} tab match “${query}”. Try the All tab.`
+                      : `No rows match “${query}”.`}
                 </td>
               </tr>
             ) : (
@@ -463,13 +497,24 @@ export default function Spreadsheet({ scans, focusId, onUpdate, onAddRow, onDele
         </table>
       </div>
 
-      {/* Sheet tabs / status bar */}
+      {/* Sheet tabs, one per location, and the status bar */}
       <div className="flex h-10 shrink-0 items-stretch border-t bg-muted text-sm">
-        <span className="-mt-px flex items-center border-x border-t-2 border-t-foreground bg-card px-4 font-medium">Scans</span>
-        <p className="ml-auto flex items-center gap-4 px-4 text-xs text-muted-foreground tabular-nums" role="status">
+        <LocationTabs
+          variant="sheet"
+          groups={places}
+          total={scans.length}
+          value={place?.key ?? null}
+          onChange={changeTab}
+          panelId="sheet-panel"
+          className="flex-1"
+        />
+        <p
+          className="flex shrink-0 items-center gap-4 border-l px-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+          role="status"
+        >
           {selectedIds.length > 0 && <span>{selectedIds.length} selected</span>}
           <span>
-            {query ? `${rows.length} of ${scans.length} rows` : `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
+            {query || place ? `${rows.length} of ${scans.length} rows` : `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
           </span>
         </p>
       </div>

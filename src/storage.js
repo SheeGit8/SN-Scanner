@@ -81,7 +81,42 @@ export const methodLabel = (scan) => ({ camera: 'Camera', photo: 'Photo' })[scan
 /** The text fields a search or filter looks in. `user` is the person who uses the item. */
 export const searchValues = (s) => [s.serial, itemName(s), s.user, s.model, s.color, s.location, s.note]
 
-export const CSV_HEADER = ['Serial number', 'Name', 'User', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
+const tidyLocation = (location) => String(location ?? '').trim().replace(/\s+/g, ' ')
+
+/** A location made comparable, so "Stockroom B", "stockroom b " and "STOCKROOM  B" are one place. '' is no location. */
+export const locationKey = (location) => tidyLocation(location).toLowerCase()
+
+/**
+ * The places items are kept, for the location tabs and the dashboard: [{ key, label, count }].
+ * Sorted by name, with the items that have no location (key '') last. A place is shown with its
+ * most used spelling.
+ */
+export function locationGroups(scans) {
+  const groups = new Map()
+  for (const s of scans) {
+    const key = locationKey(s.location)
+    let group = groups.get(key)
+    if (!group) groups.set(key, (group = { key, count: 0, spellings: new Map() }))
+    group.count++
+    const spelling = tidyLocation(s.location)
+    group.spellings.set(spelling, (group.spellings.get(spelling) ?? 0) + 1)
+  }
+  return [...groups.values()]
+    .map(({ key, count, spellings }) => ({
+      key,
+      count,
+      // On a tie, the first spelling seen wins; the list is newest first.
+      label: key ? [...spellings].reduce((best, s) => (s[1] > best[1] ? s : best))[0] : 'No location',
+    }))
+    .sort((a, b) =>
+      !a.key !== !b.key ? (a.key ? -1 : 1) : a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
+    )
+}
+
+/** The scans kept at one location (a key from locationGroups), or all of them for null. */
+export const inLocation = (scans, key) => (key == null ? scans : scans.filter((s) => locationKey(s.location) === key))
+
+export const CSV_HEADER =['Serial number', 'Name', 'User', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
 
 export function csvRow(s) {
   return [
