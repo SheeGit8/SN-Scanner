@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createLocalStock, createStockSync } from './stock.js'
+import { EDIT_KEYS, createLocalStock, createStockSync } from './stock.js'
 
 /** localStorage stand-in. */
 function memoryStorage(initial = {}) {
@@ -14,8 +14,11 @@ function memoryStorage(initial = {}) {
 
 const err = (message, extra) => Object.assign(new Error(message), extra)
 
-/** A stand-in for code.gs with the same rules: adds replace, updates skip missing rows, deletes are quiet. */
-function fakeSheet() {
+/**
+ * A stand-in for code.gs with the same rules: adds replace, updates skip missing rows, deletes are
+ * quiet. `fields` is what it says it stores; an older Code.gs said nothing.
+ */
+function fakeSheet({ fields = EDIT_KEYS } = {}) {
   const rows = new Map()
   let version = 1
   let fail = null
@@ -24,7 +27,7 @@ function fakeSheet() {
   async function api(fn, ...args) {
     calls.push(fn)
     if (fail) throw fail
-    if (fn === 'getItems') return { items: list(), version: String(version) }
+    if (fn === 'getItems') return { items: list(), version: String(version), fields }
     if (fn === 'getVersion') return String(version)
     if (fn === 'applyChanges') {
       for (const o of args[0]) {
@@ -33,7 +36,7 @@ function fakeSheet() {
         else if (o.op === 'delete') rows.delete(o.id)
       }
       version++
-      return { items: list(), version: String(version), skipped: [] }
+      return { items: list(), version: String(version), fields, skipped: [] }
     }
     if (fn === 'uploadPhoto') {
       const row = rows.get(args[0].id)
@@ -219,6 +222,29 @@ describe('createStockSync', () => {
     expect(sheet.calls.filter((c) => c !== 'getItems')).toEqual(['applyChanges', 'uploadPhoto'])
     expect(snap().scans[0]).toMatchObject({ hasPhoto: true, photoId: 'photo-d1' })
     expect(snap().pending).toBe(0)
+  })
+
+  it('says once when the sheet’s Code.gs is too old to store a field', async () => {
+    const notices = []
+    const sheet = fakeSheet({ fields: null }) // Code.gs from before Category
+    const { stock } = setup({ sheet })
+    stock.setNotify((m, type) => notices.push([m, type]))
+    stock.add(scan('o1', { category: 'Monitor' }))
+    await stock.sync()
+    stock.update('o1', { category: 'RAM' })
+    await stock.sync()
+    expect(notices).toHaveLength(1)
+    expect(notices[0][0]).toMatch(/Code\.gs is older than this app, so Category isn’t saved in the sheet\./)
+    expect(notices[0][1]).toBe('error')
+
+    // A Code.gs that stores every field the app sends: no notice.
+    const quiet = []
+    const fresh = setup()
+    fresh.stock.setNotify((m) => quiet.push(m))
+    fresh.stock.add(scan('o2', { category: 'Monitor' }))
+    await fresh.stock.sync()
+    expect(quiet).toEqual([])
+    expect(fresh.sheet.rows.get('o2').category).toBe('Monitor')
   })
 
   it('drops a photo the sheet refuses and carries on', async () => {

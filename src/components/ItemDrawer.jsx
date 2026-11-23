@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import { Camera, Check, ImageIcon, ImageOff, Keyboard, Sheet, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog, Dialog, Field, Input, Skeleton } from './ui.jsx'
 import PhotoView from './PhotoView.jsx'
-import { formatDate, formatTime, itemName } from '../storage.js'
+import { CategorySelect } from './Category.jsx'
+import { formatDate, formatTime, itemName, tidyCategory } from '../storage.js'
 import { getPhoto, savePhoto } from '../photos.js'
 import { useToast } from '../lib/toast.js'
 import { call, deletedFrom, isRemote } from '../lib/api.js'
 
 const FIELDS = [
   { key: 'name', label: 'Name', placeholder: 'e.g. Dell Latitude laptop', wide: true },
+  { key: 'category', label: 'Category', select: true, wide: true },
   { key: 'user', label: 'User', placeholder: 'e.g. Juan Dela Cruz', hint: 'The person who uses this item. Blank means it’s in stock.', wide: true },
   { key: 'serial', label: 'Serial number', placeholder: 'e.g. 5CG1234XYZ', mono: true, wide: true },
   { key: 'model', label: 'Model', placeholder: 'e.g. Latitude 5420' },
@@ -56,7 +58,9 @@ function useItemPhoto(scan) {
 }
 
 const initialValues = (scan) =>
-  Object.fromEntries(FIELDS.map(({ key }) => [key, key === 'name' ? itemName(scan) : (scan[key] ?? '')]))
+  Object.fromEntries(
+    FIELDS.map(({ key }) => [key, key === 'name' ? itemName(scan) : key === 'category' ? tidyCategory(scan.category) : (scan[key] ?? '')]),
+  )
 
 export default function ItemDrawer({ scan, onClose, onUpdate, onDelete, onShowInSheet }) {
   const [values, setValues] = useState(() => initialValues(scan))
@@ -131,19 +135,23 @@ export default function ItemDrawer({ scan, onClose, onUpdate, onDelete, onShowIn
             ))}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            {FIELDS.map(({ key, label: fieldLabel, placeholder, hint, mono, wide }) => (
+            {FIELDS.map(({ key, label: fieldLabel, placeholder, hint, mono, wide, select }) => (
               <Field key={key} id={`item-${key}`} label={fieldLabel} hint={hint} className={wide ? 'sm:col-span-2' : undefined}>
-                {(p) => (
-                  <Input
-                    {...p}
-                    value={values[key]}
-                    placeholder={placeholder}
-                    className={mono ? 'font-mono' : undefined}
-                    autoComplete="off"
-                    spellCheck={key === 'note'}
-                    onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-                  />
-                )}
+                {(p) =>
+                  select ? (
+                    <CategorySelect {...p} value={values[key]} onChange={(v) => setValues((cur) => ({ ...cur, [key]: v }))} />
+                  ) : (
+                    <Input
+                      {...p}
+                      value={values[key]}
+                      placeholder={placeholder}
+                      className={mono ? 'font-mono' : undefined}
+                      autoComplete="off"
+                      spellCheck={key === 'note'}
+                      onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                    />
+                  )
+                }
               </Field>
             ))}
           </div>

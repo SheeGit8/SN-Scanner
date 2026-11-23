@@ -13,7 +13,7 @@ function read(key, fallback) {
 export const loadScans = () => read(SCANS_KEY, [])
 export const saveScans = (scans) => localStorage.setItem(SCANS_KEY, JSON.stringify(scans))
 
-export const loadPrefs = () => read(PREFS_KEY, { name: '', location: '' })
+export const loadPrefs = () => read(PREFS_KEY, { name: '', category: '', location: '' })
 export const savePrefs = (prefs) => localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
 
 export function makeId() {
@@ -79,48 +79,93 @@ export const itemName = (scan) => scan.name || scan.type || ''
 export const methodLabel = (scan) => ({ camera: 'Camera', photo: 'Photo' })[scan.source] ?? 'Typed'
 
 /** The text fields a search or filter looks in. `user` is the person who uses the item. */
-export const searchValues = (s) => [s.serial, itemName(s), s.user, s.model, s.color, s.location, s.note]
+export const searchValues = (s) => [s.serial, s.category, itemName(s), s.user, s.model, s.color, s.location, s.note]
 
-const tidyLocation = (location) => String(location ?? '').trim().replace(/\s+/g, ' ')
-
-/** A location made comparable, so "Stockroom B", "stockroom b " and "STOCKROOM  B" are one place. '' is no location. */
-export const locationKey = (location) => tidyLocation(location).toLowerCase()
+const tidy = (text) => String(text ?? '').trim().replace(/\s+/g, ' ')
+const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
 
 /**
- * The places items are kept, for the location tabs and the dashboard: [{ key, label, count }].
- * Sorted by name, with the items that have no location (key '') last. A place is shown with its
- * most used spelling.
+ * Counts `scans` by one field: [{ key, label, count }], unsorted. `keyOf` makes values comparable
+ * and `spell` tidies them; a group is shown with its most used spelling. Key '' is the scans with
+ * nothing in the field, labelled `emptyLabel`.
  */
-export function locationGroups(scans) {
+function groupBy(scans, field, keyOf, spell, emptyLabel) {
   const groups = new Map()
   for (const s of scans) {
-    const key = locationKey(s.location)
+    const key = keyOf(s[field])
     let group = groups.get(key)
     if (!group) groups.set(key, (group = { key, count: 0, spellings: new Map() }))
     group.count++
-    const spelling = tidyLocation(s.location)
+    const spelling = spell(s[field])
     group.spellings.set(spelling, (group.spellings.get(spelling) ?? 0) + 1)
   }
-  return [...groups.values()]
-    .map(({ key, count, spellings }) => ({
-      key,
-      count,
-      // On a tie, the first spelling seen wins; the list is newest first.
-      label: key ? [...spellings].reduce((best, s) => (s[1] > best[1] ? s : best))[0] : 'No location',
-    }))
-    .sort((a, b) =>
-      !a.key !== !b.key ? (a.key ? -1 : 1) : a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
-    )
+  return [...groups.values()].map(({ key, count, spellings }) => ({
+    key,
+    count,
+    // On a tie, the first spelling seen wins; the list is newest first.
+    label: key ? [...spellings].reduce((best, s) => (s[1] > best[1] ? s : best))[0] : emptyLabel,
+  }))
+}
+
+/** A location made comparable, so "Stockroom B", "stockroom b " and "STOCKROOM  B" are one place. '' is no location. */
+export const locationKey = (location) => tidy(location).toLowerCase()
+
+/**
+ * The places items are kept, for the location tabs and the dashboard: [{ key, label, count }].
+ * Sorted by name, with the items that have no location (key '') last.
+ */
+export function locationGroups(scans) {
+  return groupBy(scans, 'location', locationKey, tidy, 'No location').sort((a, b) =>
+    !a.key !== !b.key ? (a.key ? -1 : 1) : byName(a.label, b.label),
+  )
 }
 
 /** The scans kept at one location (a key from locationGroups), or all of them for null. */
 export const inLocation = (scans, key) => (key == null ? scans : scans.filter((s) => locationKey(s.location) === key))
 
-export const CSV_HEADER =['Serial number', 'Name', 'User', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
+/**
+ * The kinds of item, in the order the menus list them. The sheet's Category column offers the
+ * same list (CATEGORIES in app-script/code.gs).
+ */
+export const CATEGORIES = ['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', 'Other']
+
+/**
+ * A category in the list's spelling, so "ram" typed into the sheet is RAM. A category the list
+ * doesn't have (typed into the sheet by hand) is kept, tidied.
+ */
+export function tidyCategory(category) {
+  const text = tidy(category)
+  return CATEGORIES.find((c) => c.toLowerCase() === text.toLowerCase()) ?? text
+}
+
+/** A category made comparable. '' is no category. */
+export const categoryKey = (category) => tidy(category).toLowerCase()
+
+// List order; categories the list doesn't have go just before Other, and no category goes last.
+const categoryRank = (key) => {
+  const i = CATEGORIES.findIndex((c) => c.toLowerCase() === key)
+  return i !== -1 ? i : key ? CATEGORIES.length - 1.5 : CATEGORIES.length
+}
+
+/**
+ * The kinds of item in the stock list, for the category filters and the dashboard:
+ * [{ key, label, count }] in list order, then the items with no category (key '').
+ */
+export function categoryGroups(scans) {
+  return groupBy(scans, 'category', categoryKey, tidyCategory, 'No category').sort(
+    (a, b) => categoryRank(a.key) - categoryRank(b.key) || byName(a.label, b.label),
+  )
+}
+
+/** The scans in one category (a key from categoryGroups), or all of them for null. */
+export const inCategory = (scans, key) => (key == null ? scans : scans.filter((s) => categoryKey(s.category) === key))
+
+export const CSV_HEADER = ['Serial number', 'Category', 'Name', 'User', 'Model', 'Color', 'Location', 'Note', 'Method', 'Scanned at']
 
 export function csvRow(s) {
   return [
     s.serial ?? '',
+    tidyCategory(s.category),
     itemName(s),
     s.user ?? '',
     s.model ?? '',

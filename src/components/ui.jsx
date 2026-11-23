@@ -1,6 +1,6 @@
 /* Small shadcn/ui-style primitives, written by hand (no Radix). See DESIGN.md section 5.1. */
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { CircleAlert, CircleCheck, Info, LoaderCircle, TriangleAlert, X } from 'lucide-react'
+import { ChevronDown, CircleAlert, CircleCheck, Info, LoaderCircle, TriangleAlert, X } from 'lucide-react'
 
 import { cn, focusRing } from '../lib/utils.js'
 import { ToastCtx } from '../lib/toast.js'
@@ -73,6 +73,29 @@ const inputBase =
 
 export function Input({ className, ...props }) {
   return <input className={cn(inputBase, 'h-9 py-1 pointer-coarse:h-11', focusRing, className)} {...props} />
+}
+
+/**
+ * A native <select> styled like Input. Phones open their own picker, which beats a custom list
+ * for one-handed use. `className` goes on the wrapper, so it sizes the whole control.
+ */
+export function Select({ className, selectClassName, children, ...props }) {
+  return (
+    <div className={cn('relative min-w-0', className)}>
+      <select
+        className={cn(
+          inputBase,
+          'h-9 cursor-pointer appearance-none truncate py-1 pr-9 pointer-coarse:h-11 [&>option]:bg-popover [&>option]:text-foreground',
+          focusRing,
+          selectClassName,
+        )}
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+    </div>
+  )
 }
 
 export function Textarea({ className, ...props }) {

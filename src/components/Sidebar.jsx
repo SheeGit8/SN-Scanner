@@ -95,7 +95,7 @@ function ItemList({ scans, selectedId, onOpenItem }) {
                     type="button"
                     onClick={() => onOpenItem(s.id)}
                     aria-current={active ? 'true' : undefined}
-                    title={[name, s.serial, s.user, s.model, s.location].filter(Boolean).join(' · ')}
+                    title={[name, s.serial, s.category, s.user, s.model, s.location].filter(Boolean).join(' · ')}
                     className={cn(
                       'grid w-full gap-0.5 rounded-lg px-3 py-2 text-left transition-colors duration-150',
                       sidebarFocus,

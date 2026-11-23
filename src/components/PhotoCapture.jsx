@@ -160,7 +160,7 @@ export default function PhotoCapture({ scans, onSave, onHistory }) {
       ...details,
       ...(stored && { hasPhoto: true }),
     })
-    savePrefs({ name: details.name, location: details.location })
+    savePrefs({ name: details.name, category: details.category, location: details.location })
     setSavedCount((n) => n + 1)
 
     const label = [details.serial, details.name].filter(Boolean).join(' · ')

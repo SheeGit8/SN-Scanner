@@ -1,5 +1,6 @@
 import { ChevronRight, TriangleAlert, UserRound } from 'lucide-react'
 import { Badge } from './ui.jsx'
+import { CategoryBadge } from './Category.jsx'
 import { formatTime, itemName } from '../storage.js'
 
 /** One scanned item in a list. The main area opens the item; `children` holds row actions. */
@@ -25,6 +26,7 @@ export default function ScanRow({ scan, onOpen, children }) {
                 No serial number
               </Badge>
             )}
+            <CategoryBadge category={scan.category} />
           </p>
           {(scan.user || details.length > 0 || scan.note) && (
             <p className="truncate text-xs text-muted-foreground">

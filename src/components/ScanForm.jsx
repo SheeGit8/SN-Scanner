@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Check } from 'lucide-react'
 import { Alert, Button, ConfirmDialog, Dialog, Field, Input } from './ui.jsx'
 import PhotoView from './PhotoView.jsx'
-import { formatDay, formatTime, loadPrefs } from '../storage.js'
+import { CategorySelect } from './Category.jsx'
+import { formatDay, formatTime, loadPrefs, tidyCategory } from '../storage.js'
 
 /** "today at 7:06 AM", "yesterday at …" or "on Wed, Nov 18, 2026 at …" */
 function scannedPhrase(iso) {
@@ -44,10 +45,11 @@ const COPY = {
   },
 }
 
-/** What the fields start with: the scan, plus the name and location remembered from the last save. */
+/** What the fields start with: the scan, plus the category, name and location remembered from the last save. */
 function startValues(pending, prefs) {
   return {
     serial: pending.serial,
+    category: tidyCategory(prefs.category),
     name: prefs.name ?? '',
     user: '',
     model: pending.model,
@@ -68,7 +70,7 @@ export default function ScanForm({ pending, scans, onSave, onDiscard, onChange }
   const [prefs] = useState(loadPrefs)
   const [initial] = useState(() => startValues(pending, prefs))
   const [values, setValues] = useState(() => ({ ...initial, ...pending.values }))
-  const { serial, name, user, model, color, location, note } = values
+  const { serial, category, name, user, model, color, location, note } = values
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -95,6 +97,7 @@ export default function ScanForm({ pending, scans, onSave, onDiscard, onChange }
     try {
       await onSave({
         serial: cleanSerial,
+        category: tidyCategory(category),
         name: name.trim(),
         user: user.trim(),
         model: model.trim(),
@@ -159,6 +162,10 @@ export default function ScanForm({ pending, scans, onSave, onDiscard, onChange }
               {existing.location ? ` · ${existing.location}` : ''}. Saving adds it again.
             </Alert>
           )}
+
+          <Field id="scan-category" label="Category" optional hint="Remembered on this device for the next scan.">
+            {(p) => <CategorySelect {...p} value={category ?? ''} onChange={set('category')} />}
+          </Field>
 
           <Field id="scan-name" label="Name" hint="Remembered on this device for the next scan.">
             {text('name', { placeholder: 'e.g. Dell Latitude laptop', 'data-autofocus': !isPhoto || undefined })}

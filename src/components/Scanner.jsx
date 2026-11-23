@@ -246,7 +246,7 @@ export default function Scanner({ scans, onSave, onHistory }) {
       scannedAt: new Date().toISOString(),
       ...details,
     })
-    savePrefs({ name: details.name, location: details.location })
+    savePrefs({ name: details.name, category: details.category, location: details.location })
     setSavedCount((n) => n + 1)
     toast(`Saved ${details.serial}${details.name ? ` · ${details.name}` : ''}.`)
     resume(pending.serial)

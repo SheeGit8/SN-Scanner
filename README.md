@@ -76,11 +76,22 @@ first time that browser opens the connected app.
 - **Label photos** are uploaded to the Drive folder after the item itself. The `Photo` column links
   to the file. Other devices download a photo when someone opens the item. Deleting an item moves
   its photo to the Drive trash.
+- **Categories:** Keyboard, Mouse, Monitor, RAM, Processor, Graphics card, Storage, Motherboard and
+  Other. Pick one when saving a scan (the last one is remembered on that device), in an item's
+  details, or in the spreadsheet's Category column. History and the spreadsheet can show one
+  category at a time, and the dashboard counts items by category. In Google Sheets the `Category`
+  column has the same list as a dropdown. Typing another word there still works; the app shows it
+  as its own category. To change the list, edit `CATEGORIES` in both `src/storage.js` and
+  `app-script/code.gs`.
 
 ## Updating `code.gs`
 
 After pasting a newer `code.gs` into Apps Script: **Deploy → Manage deployments → Edit (pencil) →
 Version: New version → Deploy**. The URL stays the same, so Vercel needs no change.
+
+A sheet made by an older `code.gs` gets any new columns (such as `Category`) the first time the new
+version runs; existing rows are kept. While the deployed `code.gs` is older than the app, the app
+shows a warning naming the fields the sheet won't save.
 
 ## Security
 

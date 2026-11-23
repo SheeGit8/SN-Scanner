@@ -22,7 +22,9 @@ const SEND_DELAY_MS = 300 // lets a quick run of edits go in one request
 const MAX_RETRY_MS = 120_000
 
 /** Fields people can change after a scan is saved. */
-const EDIT_KEYS = ['serial', 'name', 'user', 'model', 'color', 'location', 'note']
+export const EDIT_KEYS = ['serial', 'category', 'name', 'user', 'model', 'color', 'location', 'note']
+// What a Code.gs from before Category stored. It didn't list its fields.
+const FIRST_FIELDS = ['serial', 'name', 'user', 'model', 'color', 'location', 'note']
 
 function reader(storage) {
   return {
@@ -192,8 +194,27 @@ export function createStockSync({
 
   /* ---------- Talking to the sheet ---------- */
 
+  /**
+   * The sheet lists the fields it stores (`fields`). An older Code.gs drops fields this app sends,
+   * such as Category, without an error, so say so once.
+   */
+  let warnedOldScript = false
+  function warnIfOldScript(res) {
+    if (warnedOldScript) return
+    const stored = res?.fields ?? FIRST_FIELDS
+    const missing = EDIT_KEYS.filter((key) => !stored.includes(key))
+    if (!missing.length) return
+    warnedOldScript = true
+    const names = missing.map((key) => key[0].toUpperCase() + key.slice(1)).join(' and ')
+    notify(
+      `The Google Sheet’s Code.gs is older than this app, so ${names} ${missing.length === 1 ? 'isn’t' : 'aren’t'} saved in the sheet. Paste the latest code.gs into Apps Script and deploy a new version.`,
+      'error',
+    )
+  }
+
   function setSheet(next) {
     if (locked) return // logged out while the request was on its way: don't keep the list
+    warnIfOldScript(next)
     const before = sheet?.items ?? []
     sheet = { items: next.items, version: next.version }
     sheetGen++

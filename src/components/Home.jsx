@@ -2,12 +2,56 @@ import { ArrowRight, CalendarDays, Camera, ChevronRight, MapPin, Package, ScanTe
 import { Button, Card, CardTitle } from './ui.jsx'
 import { EmptyState, PageHeader, StatCard } from './Layout.jsx'
 import ScanRow from './ScanRow.jsx'
-import { formatLongDate, formatRelative, isSameDay, locationGroups } from '../storage.js'
+import { CategoryIcon } from './Category.jsx'
+import { categoryGroups, formatLongDate, formatRelative, isSameDay, locationGroups } from '../storage.js'
+import { cn } from '../lib/utils.js'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-/** `onLocation(key)` opens History on that location's tab. */
-export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, onLocation, onOpen }) {
+/**
+ * Counts with a bar each, in the order given. Each row opens History filtered to it.
+ * `groups` is [{ key, label, count }]; key '' is the items without a value.
+ */
+function GroupCard({ id, title, groups, onPick, describe, icon }) {
+  const max = Math.max(1, ...groups.map((g) => g.count))
+  return (
+    <Card as="section" aria-labelledby={id}>
+      <div className="border-b px-5 py-4">
+        <CardTitle id={id}>{title}</CardTitle>
+      </div>
+      <ul className="grid gap-1 px-2 py-2">
+        {groups.map(({ key, label, count }) => (
+          <li key={key || '__none'}>
+            <button
+              type="button"
+              onClick={() => onPick(key)}
+              className="group w-full rounded-md px-3 py-2 text-left transition-colors duration-150 outline-none hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring"
+              title={describe(key, label)}
+            >
+              <span className="flex items-baseline justify-between gap-3 text-sm">
+                <span className={cn('flex min-w-0 items-center gap-2', !key && 'text-muted-foreground italic')}>
+                  {icon?.(key, label)}
+                  <span className="truncate">{label}</span>
+                </span>
+                <span className="flex items-center gap-1 font-mono text-muted-foreground tabular-nums">
+                  {count}
+                  <span className="sr-only">{count === 1 ? ' item' : ' items'}</span>
+                  <ChevronRight className="size-3.5 translate-y-0.5 opacity-50 group-hover:opacity-100" aria-hidden="true" />
+                </span>
+              </span>
+              <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <span className="block h-full rounded-full bg-foreground/70" style={{ width: `${(count / max) * 100}%` }} />
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+/** `onLocation(key)` and `onCategory(key)` open History on that location's tab or category. */
+export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, onLocation, onCategory, onOpen }) {
   const now = new Date()
   const todayCount = scans.filter((s) => isSameDay(new Date(s.scannedAt), now)).length
   const weekCount = scans.filter((s) => now.getTime() - new Date(s.scannedAt).getTime() < WEEK_MS).length
@@ -19,7 +63,8 @@ export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, 
   const namedLocations = locations.filter((g) => g.key).length
   const noLocation = locations.find((g) => !g.key)?.count ?? 0
   const topLocations = locations.slice(0, 6)
-  const maxCount = topLocations[0]?.count ?? 1
+  // Every category in use, in list order, so the same kind is always in the same place.
+  const categories = categoryGroups(scans)
 
   return (
     <div className="grid gap-6">
@@ -97,35 +142,29 @@ export default function Dashboard({ scans, onScan, onPhoto, onSheet, onHistory, 
             </ul>
           </Card>
 
-          <Card as="section" aria-labelledby="loc-heading" className="self-start">
-            <div className="border-b px-5 py-4">
-              <CardTitle id="loc-heading">Items by location</CardTitle>
-            </div>
-            <ul className="grid gap-1 px-2 py-2">
-              {topLocations.map(({ key, label, count }) => (
-                <li key={key || '__none'}>
-                  <button
-                    type="button"
-                    onClick={() => onLocation(key)}
-                    className="group w-full rounded-md px-3 py-2 text-left transition-colors duration-150 outline-none hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring"
-                    title={`See the items ${key ? `in ${label}` : 'with no location'}`}
-                  >
-                    <span className="flex items-baseline justify-between gap-3 text-sm">
-                      <span className={key ? 'truncate' : 'truncate text-muted-foreground italic'}>{label}</span>
-                      <span className="flex items-center gap-1 font-mono text-muted-foreground tabular-nums">
-                        {count}
-                        <span className="sr-only">{count === 1 ? ' item' : ' items'}</span>
-                        <ChevronRight className="size-3.5 translate-y-0.5 opacity-50 group-hover:opacity-100" aria-hidden="true" />
-                      </span>
-                    </span>
-                    <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                      <span className="block h-full rounded-full bg-foreground/70" style={{ width: `${(count / maxCount) * 100}%` }} />
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Card>
+          <div className="grid gap-6 self-start">
+            <GroupCard
+              id="cat-heading"
+              title="Items by category"
+              groups={categories}
+              onPick={onCategory}
+              describe={(key, label) => `See the ${key ? `${label} items` : 'items with no category'}`}
+              icon={(key, label) =>
+                key ? (
+                  <CategoryIcon category={label} className="size-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <span className="size-4 shrink-0" aria-hidden="true" />
+                )
+              }
+            />
+            <GroupCard
+              id="loc-heading"
+              title="Items by location"
+              groups={topLocations}
+              onPick={onLocation}
+              describe={(key, label) => `See the items ${key ? `in ${label}` : 'with no location'}`}
+            />
+          </div>
         </div>
       )}
     </div>

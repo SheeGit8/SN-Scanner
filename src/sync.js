@@ -19,7 +19,7 @@
 import { itemName } from './storage.js'
 
 /** Fields the sheet stores for an item (see ITEM_FIELDS in code.gs). */
-const SHEET_FIELDS = ['serial', 'name', 'user', 'model', 'color', 'location', 'note', 'source', 'scannedAt']
+const SHEET_FIELDS = ['serial', 'category', 'name', 'user', 'model', 'color', 'location', 'note', 'source', 'scannedAt']
 
 /** The part of a scan record that goes to the sheet. Older records keep their name in `type`. */
 export function itemForSheet(scan) {

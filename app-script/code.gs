@@ -56,6 +56,7 @@ const CONFIG = {
 /** [key, header]. Same order as the app's CSV export, then the columns only the sheet has. */
 const ITEM_FIELDS = [
   ['serial', 'Serial number'],
+  ['category', 'Category'],
   ['name', 'Name'],
   ['user', 'User'],
   ['model', 'Model'],
@@ -69,11 +70,17 @@ const ITEM_FIELDS = [
   ['id', 'ID'],
 ];
 const DATE_KEYS_ = ['scannedAt', 'updatedAt'];
-const WIDTHS_ = { serial: 150, name: 200, user: 170, model: 140, color: 90, location: 170, note: 240, source: 80, scannedAt: 130, photo: 120, updatedAt: 130, id: 130 };
+const WIDTHS_ = { serial: 150, category: 130, name: 200, user: 170, model: 140, color: 90, location: 170, note: 240, source: 80, scannedAt: 130, photo: 120, updatedAt: 130, id: 130 };
 
 /** Fields the app may set on a new item, and the ones it may change later. */
-const ADD_KEYS_ = ['serial', 'name', 'user', 'model', 'color', 'location', 'note', 'source', 'scannedAt'];
-const EDIT_KEYS_ = ['serial', 'name', 'user', 'model', 'color', 'location', 'note'];
+const ADD_KEYS_ = ['serial', 'category', 'name', 'user', 'model', 'color', 'location', 'note', 'source', 'scannedAt'];
+const EDIT_KEYS_ = ['serial', 'category', 'name', 'user', 'model', 'color', 'location', 'note'];
+
+/**
+ * The kinds of item: the Category column's dropdown. Same list as CATEGORIES in the app
+ * (src/storage.js). Other text can still be typed into the column by hand.
+ */
+const CATEGORIES_ = ['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', 'Other'];
 
 /** How the item was added: app value <-> what the Method column shows. */
 const SOURCES_ = { camera: 'Camera', photo: 'Photo', manual: 'Typed' };
@@ -173,8 +180,9 @@ function setup() {
 /* ------------------------------------------------------------------ */
 
 /**
- * Every item, plus a `version` of the whole list. Rows typed into the sheet by hand get an ID
- * (and a scan time, if theirs is missing) so the app can edit them.
+ * Every item, plus a `version` of the whole list and the `fields` this script stores (the app
+ * warns when a field it sends is missing: this Code.gs is older than the app). Rows typed into
+ * the sheet by hand get an ID (and a scan time, if theirs is missing) so the app can edit them.
  */
 function getItems() {
   let t = table_();
@@ -186,7 +194,7 @@ function getItems() {
       return table_();
     });
   }
-  return { items: t.rows.map(function (r) { return itemFromRow_(t, r); }), version: version_(t) };
+  return { items: t.rows.map(function (r) { return itemFromRow_(t, r); }), version: version_(t), fields: EDIT_KEYS_ };
 }
 
 /** A short hash of the list. The app asks for it every minute and reloads only when it changes. */
@@ -200,7 +208,7 @@ function getVersion() {
  *   {op: 'add', id, item}     adds the item, or updates it when the ID is already there
  *   {op: 'update', id, patch} changes only the fields in `patch`; skipped when the item is gone
  *   {op: 'delete', id}        removes the row and moves its photo to the Drive trash
- * Returns { items, version, skipped: [ids of changes that couldn't be applied] }.
+ * Returns { items, version, fields, skipped: [ids of changes that couldn't be applied] }.
  */
 function applyChanges(ops) {
   if (!Array.isArray(ops)) throw new Error('Send the changes as a list.');
@@ -269,6 +277,7 @@ function applyChanges(ops) {
     return {
       items: after.rows.map(function (r) { return itemFromRow_(after, r); }),
       version: version_(after),
+      fields: EDIT_KEYS_,
       skipped: skipped,
     };
   });
@@ -358,8 +367,9 @@ function withLock_(fn) {
 }
 
 /**
- * The "Items" sheet, created with a red header row the first time. Headers the sheet is missing
- * (from an older version of this script) are added at the end.
+ * The "Items" sheet, created with a red header row the first time. A column the sheet is missing
+ * (it was made by an older version of this script) is added after the column it follows here,
+ * e.g. Category after Serial number. Columns are found by their header, so moving them is fine.
  */
 function itemsSheet_() {
   const ss = spreadsheet_();
@@ -374,16 +384,21 @@ function itemsSheet_() {
     return sh;
   }
 
-  const headers = headerRow_(sh);
-  const missing = ITEM_FIELDS.filter(function (f) { return headers.indexOf(f[1]) === -1; });
-  if (missing.length) {
-    const first = sh.getLastColumn() + 1;
-    if (sh.getMaxColumns() < first + missing.length - 1) {
-      sh.insertColumnsAfter(sh.getMaxColumns(), first + missing.length - 1 - sh.getMaxColumns());
-    }
-    writeHeaders_(sh, first, missing);
-    formatColumns_(sh, missing.map(function (f, i) { return { key: f[0], col: first + i }; }), 2, Math.max(sh.getMaxRows() - 1, 1));
-  }
+  ITEM_FIELDS.forEach(function (f, i) {
+    const headers = headerRow_(sh);
+    if (headers.indexOf(f[1]) !== -1) return;
+    // After the nearest earlier column the sheet has; first when it has none of them.
+    let after = 0;
+    for (let j = i - 1; j >= 0 && !after; j--) after = headers.indexOf(ITEM_FIELDS[j][1]) + 1;
+    if (after) sh.insertColumnAfter(after);
+    else sh.insertColumnBefore(1);
+    const col = after + 1;
+    writeHeaders_(sh, col, [f]);
+    // A new column can take on the dropdown of the one it was inserted next to.
+    if (f[0] !== 'category') sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1).setDataValidation(null);
+    formatColumns_(sh, [{ key: f[0], col: col }], 2, Math.max(sh.getMaxRows() - 1, 1));
+    sh.setColumnWidth(col, WIDTHS_[f[0]] || 120);
+  });
   return sh;
 }
 
@@ -395,11 +410,25 @@ function writeHeaders_(sh, firstCol, fields) {
     .setFontColor(CONFIG.HEADER_FG);
 }
 
-/** Text columns stay plain text (so a serial like 00123 keeps its zeros); the two times are dates. */
+/**
+ * Text columns stay plain text (so a serial like 00123 keeps its zeros); the two times are dates.
+ * Category gets a dropdown of CATEGORIES_.
+ */
 function formatColumns_(sh, cols, firstRow, numRows) {
   cols.forEach(function (c) {
-    sh.getRange(firstRow, c.col, numRows, 1).setNumberFormat(DATE_KEYS_.indexOf(c.key) >= 0 ? CONFIG.DATE_FORMAT : '@');
+    const range = sh.getRange(firstRow, c.col, numRows, 1);
+    range.setNumberFormat(DATE_KEYS_.indexOf(c.key) >= 0 ? CONFIG.DATE_FORMAT : '@');
+    if (c.key === 'category') range.setDataValidation(categoryRule_());
   });
+}
+
+/** The Category dropdown. Other text is still allowed (Sheets marks it), so nothing typed is lost. */
+function categoryRule_() {
+  return SpreadsheetApp.newDataValidation()
+    .requireValueInList(CATEGORIES_, true)
+    .setAllowInvalid(true)
+    .setHelpText('Pick a category: ' + CATEGORIES_.join(', ') + '.')
+    .build();
 }
 
 function headerRow_(sh) {

@@ -122,6 +122,7 @@ describe('itemForSheet', () => {
     expect(itemForSheet({ id: '1', type: 'Monitor', serial: 'A', hasPhoto: true, extra: 1, scannedAt: 'x' })).toEqual({
       id: '1',
       serial: 'A',
+      category: '',
       name: 'Monitor',
       user: '',
       model: '',

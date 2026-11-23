@@ -2,16 +2,33 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, PanelRightOpen, Plus, Search, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog, Input, Kbd } from './ui.jsx'
 import LocationTabs from './LocationTabs.jsx'
-import { downloadCsv, formatDate, formatTime, inLocation, itemName, locationGroups, locationKey, methodLabel } from '../storage.js'
+import { CategoryFilter } from './Category.jsx'
+import {
+  CATEGORIES,
+  categoryGroups,
+  categoryKey,
+  downloadCsv,
+  formatDate,
+  formatTime,
+  inCategory,
+  inLocation,
+  itemName,
+  locationGroups,
+  locationKey,
+  methodLabel,
+  tidyCategory,
+} from '../storage.js'
 import { cn } from '../lib/utils.js'
 import { deletedFrom } from '../lib/api.js'
 import { useToast } from '../lib/toast.js'
 
 const formatStamp = (iso) => `${formatDate(iso)} · ${formatTime(iso)}`
 
-// Column order follows the CSV export so the sheet and the file line up.
+// Column order follows the CSV export so the sheet and the file line up. A column with `options`
+// is edited with a dropdown.
 const COLUMNS = [
   { key: 'serial', label: 'Serial number', width: 168, mono: true },
+  { key: 'category', label: 'Category', width: 140, get: (s) => tidyCategory(s.category), options: CATEGORIES },
   { key: 'name', label: 'Name', width: 200, get: itemName },
   { key: 'user', label: 'User', width: 180 },
   { key: 'model', label: 'Model', width: 150 },
@@ -38,11 +55,26 @@ function compareRows(a, b, key) {
   return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' })
 }
 
+/** The options for a dropdown cell: the column's list, plus the cell's own value when the list doesn't have it. */
+const cellOptions = (col, value) => (value && !col.options.includes(value) ? [...col.options, value] : col.options)
+
 /**
- * `location` is the selected sheet tab (a key from locationGroups, or null for All); `onAddRow`
- * takes the fields a new row starts with.
+ * `location` is the selected sheet tab (a key from locationGroups, or null for All) and `category`
+ * the picked category (a key from categoryGroups, or null for all); `onAddRow` takes the fields a
+ * new row starts with.
  */
-export default function Spreadsheet({ scans, focusId, location, onLocationChange, onUpdate, onAddRow, onDeleteMany, onOpenItem }) {
+export default function Spreadsheet({
+  scans,
+  focusId,
+  location,
+  onLocationChange,
+  category,
+  onCategoryChange,
+  onUpdate,
+  onAddRow,
+  onDeleteMany,
+  onOpenItem,
+}) {
   const gridRef = useRef(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState({ key: 'scannedAt', dir: 'desc' })
@@ -51,6 +83,8 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
   // The edit last saved or cancelled. Focusing the grid afterwards blurs the cell editor, whose
   // onBlur still sees that edit; this stops it being saved a second time, or after Escape.
   const finishedEdit = useRef(null)
+  // True while a key is being handled in a dropdown cell, so its change waits for Enter or Tab.
+  const keyedChange = useRef(false)
   const [selected, setSelected] = useState(() => (focusId ? new Set([focusId]) : new Set()))
   const [anchorId, setAnchorId] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -59,14 +93,20 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
   const places = useMemo(() => locationGroups(scans), [scans])
   // A tab whose last row was moved or deleted is gone; show All instead.
   const place = places.find((g) => g.key === location) ?? null
+  const inTab = useMemo(() => inLocation(scans, place?.key), [scans, place?.key])
+  // The categories on this tab. One picked on another tab stays picked, and shows no rows here.
+  const kinds = useMemo(() => categoryGroups(inTab), [inTab])
+  const kind = category == null ? null : (kinds.find((g) => g.key === category) ?? { key: category, label: tidyCategory(category) })
+  // " in Monitor" or " with no category".
+  const what = !kind ? '' : kind.key ? ` in ${kind.label}` : ' with no category'
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const inTab = inLocation(scans, place?.key)
-    const list = q ? inTab.filter((s) => COLUMNS.some((col) => cellText(s, col).toLowerCase().includes(q))) : [...inTab]
+    const shown = inCategory(inTab, kind?.key)
+    const list = q ? shown.filter((s) => COLUMNS.some((col) => cellText(s, col).toLowerCase().includes(q))) : [...shown]
     list.sort((a, b) => compareRows(a, b, sort.key) * (sort.dir === 'asc' ? 1 : -1))
     return list
-  }, [scans, place?.key, query, sort])
+  }, [inTab, kind?.key, query, sort])
 
   // The active cell is tracked by row id so it survives sorting and filtering.
   let r = rows.findIndex((s) => s.id === active.id)
@@ -93,17 +133,26 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
 
   function startEdit(initial, from = 'cell') {
     if (!activeRow || col.readOnly) return
-    setEditing({ value: initial ?? activeValue, from })
+    let value = initial ?? activeValue
+    // Typing a letter on a dropdown cell picks the first option that starts with it.
+    if (col.options && from === 'cell' && initial !== undefined) {
+      value = col.options.find((o) => o.toLowerCase().startsWith(initial.toLowerCase())) ?? activeValue
+    }
+    setEditing({ value, from })
   }
 
-  function commit(move) {
+  /** Saves the open edit. `value` overrides the edit's own (a dropdown saves as soon as an option is picked). */
+  function commit(move, value) {
     if (editing && editing !== finishedEdit.current && activeRow && !col.readOnly) {
-      const next = editing.value.trim()
+      const raw = value ?? editing.value
+      const next = col.key === 'category' ? tidyCategory(raw) : raw.trim()
       if (next !== activeValue) {
         onUpdate(activeRow.id, { [col.key]: next })
-        // The row leaves this tab; say where it went so it doesn't just seem to vanish.
+        // The row leaves this tab or category; say where it went so it doesn't just seem to vanish.
         if (col.key === 'location' && place && locationKey(next) !== place.key)
           toast(next ? `Moved to the ${next} tab.` : 'Moved to the No location tab.')
+        if (col.key === 'category' && kind && categoryKey(next) !== kind.key)
+          toast(`Moved to ${next || 'No category'}. Pick All categories to see the row.`)
       }
     }
     finishedEdit.current = editing
@@ -219,9 +268,19 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
     setConfirmDelete(false)
   }
 
+  function changeCategory(key) {
+    if (editing) commit(null)
+    onCategoryChange(key)
+    setSelected(new Set())
+    setConfirmDelete(false)
+  }
+
   function addRow() {
-    // A row added on a location's tab starts at that location, so it stays on the tab.
-    const id = onAddRow(place?.key ? { location: place.label } : {})
+    // A row added on a location's tab starts at that location, so it stays on the tab. Same for a category.
+    const id = onAddRow({
+      ...(place?.key && { location: place.label }),
+      ...(kind?.key && { category: kind.label }),
+    })
     setQuery('')
     setSort({ key: 'scannedAt', dir: 'desc' })
     setActive({ id, c: 0 })
@@ -260,6 +319,7 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <CategoryFilter id="sheet-category" groups={kinds} total={inTab.length} value={kind?.key ?? null} onChange={changeCategory} className="sm:w-48" />
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={addRow}>
             <Plus aria-hidden="true" />
@@ -321,7 +381,12 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
       <div
         id="sheet-panel"
         role={places.length ? 'tabpanel' : undefined}
-        aria-label={place ? `Rows ${place.key ? `in ${place.label}` : 'with no location'}` : 'All rows'}
+        aria-label={[
+          place ? `Rows ${place.key ? `in ${place.label}` : 'with no location'}` : 'All rows',
+          kind && (kind.key ? `in the ${kind.label} category` : 'with no category'),
+        ]
+          .filter(Boolean)
+          .join(' ')}
         className="relative min-h-0 flex-1 overflow-auto bg-card"
       >
         <table
@@ -408,9 +473,11 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
                 <td colSpan={COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-muted-foreground">
                   {scans.length === 0
                     ? 'No rows yet. Add a row, or scan an item to fill the sheet.'
-                    : place
-                      ? `No rows on the ${place.label} tab match “${query}”. Try the All tab.`
-                      : `No rows match “${query}”.`}
+                    : !query
+                      ? `No rows${what} on the ${place?.label ?? 'All'} tab. Pick All categories to see the rest.`
+                      : place || kind
+                        ? `No rows${place ? ` on the ${place.label} tab` : ''}${what} match “${query}”. Try the All tab and All categories.`
+                        : `No rows match “${query}”.`}
                 </td>
               </tr>
             ) : (
@@ -458,7 +525,33 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
                             isActive && 'z-[1] outline-2 -outline-offset-2 outline-foreground',
                           )}
                         >
-                          {isEditingHere ? (
+                          {isEditingHere && column.options ? (
+                            <select
+                              autoFocus
+                              aria-label={`${column.label}, row ${ri + 2}`}
+                              className="absolute inset-0 w-full cursor-pointer bg-background px-1.5 outline-2 -outline-offset-2 outline-foreground [&>option]:bg-popover"
+                              value={editing.value}
+                              onKeyDown={(e) => {
+                                // Arrow keys and letters change a closed dropdown on some systems:
+                                // that's browsing, so it waits for Enter or Tab like typing does.
+                                keyedChange.current = true
+                                setTimeout(() => (keyedChange.current = false))
+                                onEditorKeyDown(e)
+                              }}
+                              onChange={(e) => {
+                                if (keyedChange.current) setEditing({ value: e.target.value, from: 'cell' })
+                                else commit(null, e.target.value) // picked from the list
+                              }}
+                              onBlur={() => commit(null)}
+                            >
+                              <option value="">No category</option>
+                              {cellOptions(column, editing.value).map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          ) : isEditingHere ? (
                             <input
                               autoFocus
                               aria-label={`${column.label}, row ${ri + 2}`}
@@ -514,7 +607,7 @@ export default function Spreadsheet({ scans, focusId, location, onLocationChange
         >
           {selectedIds.length > 0 && <span>{selectedIds.length} selected</span>}
           <span>
-            {query || place ? `${rows.length} of ${scans.length} rows` : `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
+            {query || place || kind ? `${rows.length} of ${scans.length} rows` : `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
           </span>
         </p>
       </div>
