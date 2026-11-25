@@ -2,6 +2,7 @@ import {
   CircleDashed,
   CircuitBoard,
   Cpu,
+  Fan,
   Gpu,
   HardDrive,
   Keyboard,
@@ -10,10 +11,14 @@ import {
   Monitor,
   Mouse,
   Package,
+  PlugZap,
+  Smartphone,
   Tag,
+  Usb,
+  Video,
 } from 'lucide-react'
 import { Badge, Select } from './ui.jsx'
-import { CATEGORIES, categoryColor, categoryKey, tidyCategory } from '../storage.js'
+import { CATEGORIES, CATEGORY_GROUPS, categoryColor, categoryKey, tidyCategory } from '../storage.js'
 import { cn } from '../lib/utils.js'
 
 const ICONS = {
@@ -25,6 +30,11 @@ const ICONS = {
   'graphics card': Gpu,
   storage: HardDrive,
   motherboard: CircuitBoard,
+  phone: Smartphone,
+  'car charger': PlugZap,
+  fan: Fan,
+  'dash cam': Video,
+  'usb cable': Usb,
   other: Package,
 }
 
@@ -63,12 +73,32 @@ export function CategoryBadge({ category, className }) {
 }
 
 /**
- * Picks an item's category from the list. A category typed into the sheet that the list doesn't
- * have stays selectable, so opening the item doesn't lose it.
+ * The options of a category dropdown: No category, the Office and Drivers groups, then Other.
+ * `value` is the dropdown's value; one the list doesn't have (typed into the sheet) is added at
+ * the end, so opening the dropdown doesn't lose it.
  */
+export function CategoryOptions({ value }) {
+  return (
+    <>
+      <option value="">No category</option>
+      {CATEGORY_GROUPS.map((g) => (
+        <optgroup key={g.label} label={g.label}>
+          {g.categories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+      <option value="Other">Other</option>
+      {value && !CATEGORIES.includes(value) && <option value={value}>{value}</option>}
+    </>
+  )
+}
+
+/** Picks an item's category from the list. */
 export function CategorySelect({ value, onChange, className, ...props }) {
   const current = tidyCategory(value)
-  const options = current && !CATEGORIES.includes(current) ? [...CATEGORIES, current] : CATEGORIES
   return (
     <Select
       className={className}
@@ -77,12 +107,7 @@ export function CategorySelect({ value, onChange, className, ...props }) {
       onChange={(e) => onChange(e.target.value)}
       {...props}
     >
-      <option value="">No category</option>
-      {options.map((c) => (
-        <option key={c} value={c}>
-          {c}
-        </option>
-      ))}
+      <CategoryOptions value={current} />
     </Select>
   )
 }

@@ -76,13 +76,18 @@ first time that browser opens the connected app.
 - **Label photos** are uploaded to the Drive folder after the item itself. The `Photo` column links
   to the file. Other devices download a photo when someone opens the item. Deleting an item moves
   its photo to the Drive trash.
-- **Categories:** Keyboard, Mouse, Monitor, RAM, Processor, Graphics card, Storage, Motherboard and
-  Other. Pick one when saving a scan (the last one is remembered on that device), in an item's
-  details, or in the spreadsheet's Category column. History and the spreadsheet can show one
-  category at a time, and the dashboard counts items by category. In Google Sheets the `Category`
-  column has the same list as a dropdown. Typing another word there still works; the app shows it
-  as its own category. To change the list, edit `CATEGORIES` in both `src/storage.js` and
-  `app-script/code.gs`.
+- **Categories**, in two groups:
+  - **Office:** Keyboard, Mouse, Monitor, RAM, Processor, Graphics card, Storage, Motherboard.
+  - **Drivers:** Phone, Car charger, Fan, Dash cam, USB cable.
+
+  Then Other. Pick one when saving a scan (the last one is remembered on that device), in an
+  item's details, or in the spreadsheet's Category column; the menus show the two groups under
+  their own headings. History and the spreadsheet can show one category at a time, and the
+  dashboard counts items by category. In Google Sheets the `Category` column has the same list as
+  a dropdown. Typing another word there still works; the app shows it as its own category. To
+  change the list, edit `CATEGORY_GROUPS` in `src/storage.js` and `CATEGORIES_` in
+  `app-script/code.gs`, then update `code.gs` as below. The sheet's dropdown picks up the new list
+  the next time the app loads.
 
 ## Updating `code.gs`
 

@@ -91,7 +91,7 @@ export function Select({ className, selectClassName, leading, children, ...props
       <select
         className={cn(
           inputBase,
-          'h-9 cursor-pointer appearance-none truncate py-1 pr-9 pointer-coarse:h-11 [&>option]:bg-popover [&>option]:text-foreground',
+          'h-9 cursor-pointer appearance-none truncate py-1 pr-9 pointer-coarse:h-11 [&_optgroup]:bg-popover [&_optgroup]:text-muted-foreground [&_option]:bg-popover [&_option]:text-foreground',
           leading && 'pl-9',
           focusRing,
           selectClassName,

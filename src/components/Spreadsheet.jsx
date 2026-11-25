@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, PanelRightOpen, Plus, Search, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog, Input, Kbd } from './ui.jsx'
 import LocationTabs from './LocationTabs.jsx'
-import { CategoryFilter, CategoryIcon } from './Category.jsx'
+import { CategoryFilter, CategoryIcon, CategoryOptions } from './Category.jsx'
 import {
   CATEGORIES,
   categoryGroups,
@@ -25,7 +25,7 @@ import { useToast } from '../lib/toast.js'
 const formatStamp = (iso) => `${formatDate(iso)} · ${formatTime(iso)}`
 
 // Column order follows the CSV export so the sheet and the file line up. A column with `options`
-// is edited with a dropdown.
+// (only Category) is edited with a dropdown of CategoryOptions.
 const COLUMNS = [
   { key: 'serial', label: 'Serial number', width: 168, mono: true },
   { key: 'category', label: 'Category', width: 140, get: (s) => tidyCategory(s.category), options: CATEGORIES },
@@ -54,9 +54,6 @@ function compareRows(a, b, key) {
   if (!x !== !y) return x ? -1 : 1 // blanks always last
   return x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' })
 }
-
-/** The options for a dropdown cell: the column's list, plus the cell's own value when the list doesn't have it. */
-const cellOptions = (col, value) => (value && !col.options.includes(value) ? [...col.options, value] : col.options)
 
 /**
  * `location` is the selected sheet tab (a key from locationGroups, or null for All) and `category`
@@ -529,7 +526,7 @@ export default function Spreadsheet({
                             <select
                               autoFocus
                               aria-label={`${column.label}, row ${ri + 2}`}
-                              className="absolute inset-0 w-full cursor-pointer bg-background px-1.5 outline-2 -outline-offset-2 outline-foreground [&>option]:bg-popover"
+                              className="absolute inset-0 w-full cursor-pointer bg-background px-1.5 outline-2 -outline-offset-2 outline-foreground [&_optgroup]:bg-popover [&_option]:bg-popover"
                               value={editing.value}
                               onKeyDown={(e) => {
                                 // Arrow keys and letters change a closed dropdown on some systems:
@@ -544,12 +541,7 @@ export default function Spreadsheet({
                               }}
                               onBlur={() => commit(null)}
                             >
-                              <option value="">No category</option>
-                              {cellOptions(column, editing.value).map((o) => (
-                                <option key={o} value={o}>
-                                  {o}
-                                </option>
-                              ))}
+                              <CategoryOptions value={editing.value} />
                             </select>
                           ) : isEditingHere ? (
                             <input

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import { itemName, csvRow, CSV_HEADER, searchValues, inLocation, locationGroups, locationKey, CATEGORIES, tidyCategory, categoryKey, categoryGroups, inCategory, categoryColor } from './storage.js'
+import { itemName, csvRow, CSV_HEADER, searchValues, inLocation, locationGroups, locationKey, CATEGORIES, CATEGORY_GROUPS, tidyCategory, categoryKey, categoryGroups, inCategory, categoryColor } from './storage.js'
 
 describe('itemName', () => {
   it('falls back to legacy type', () => expect(itemName({ type: 'Laptop' })).toBe('Laptop'))
@@ -55,8 +55,25 @@ describe('searchValues', () => {
 describe('categories', () => {
   const of = (category, id = category) => ({ id, category })
 
-  it('has the kinds of item asked for, then Other', () =>
-    expect(CATEGORIES).toEqual(['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', 'Other']))
+  it('has the office kinds of item, then the drivers’, then Other', () => {
+    expect(CATEGORY_GROUPS.map((g) => g.label)).toEqual(['Office', 'Drivers'])
+    expect(CATEGORIES).toEqual([
+      'Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard',
+      'Phone', 'Car charger', 'Fan', 'Dash cam', 'USB cable',
+      'Other',
+    ])
+  })
+
+  it('offers the same list in the sheet’s Category dropdown', () => {
+    const gs = readFileSync(new URL('../app-script/code.gs', import.meta.url), 'utf8')
+    const list = gs.match(/const CATEGORIES_ = \[([^\]]*)\]/)[1]
+    expect([...list.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual(CATEGORIES)
+  })
+
+  it('spells a driver category the list’s way', () => {
+    expect(tidyCategory('usb  CABLE')).toBe('USB cable')
+    expect(tidyCategory(' dash cam')).toBe('Dash cam')
+  })
 
   it('spells a listed category the list’s way and keeps others as typed', () => {
     expect(tidyCategory('ram')).toBe('RAM')
@@ -126,11 +143,18 @@ describe('categoryColor', () => {
     expect(categoryColor(' graphics  CARD ')).toBe('var(--cat-graphics-card)')
   })
 
-  it('has a token for every category in the list', () => {
+  it('has a light and a dark color for every category in the list', () => {
     const css = readFileSync(new URL('./index.css', import.meta.url), 'utf8')
+    const definitions = (token) => css.match(new RegExp(`${token}:`, 'g'))?.length
     for (const c of CATEGORIES) {
-      const token = categoryColor(c).slice(4, -1)
-      expect(css.match(new RegExp(`${token}:`, 'g'))?.length, token).toBe(2) // light and dark
+      let token = categoryColor(c).slice(4, -1)
+      // A driver category borrows an office one's color, e.g. --cat-phone: var(--cat-monitor).
+      const borrowed = css.match(new RegExp(`${token}: var\\((--cat-[a-z-]+)\\)`))
+      if (borrowed) {
+        expect(definitions(token), token).toBe(1)
+        token = borrowed[1]
+      }
+      expect(definitions(token), token).toBe(2) // light and dark
     }
   })
 

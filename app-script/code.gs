@@ -46,6 +46,7 @@ const CONFIG = {
   FOLDER_PROPERTY: 'PHOTO_FOLDER_ID',
   SYNC_TOKEN_PROPERTY: 'SYNC_TOKEN',
   SPREADSHEET_PROPERTY: 'SPREADSHEET_URL',
+  CATEGORIES_PROPERTY: 'CATEGORY_LIST', // the list the Category dropdown was last given
   HEADER_BG: '#C8102E', // Sheehan red
   HEADER_FG: '#FFFFFF',
   DATE_FORMAT: 'yyyy-mm-dd hh:mm',
@@ -80,7 +81,11 @@ const EDIT_KEYS_ = ['serial', 'category', 'name', 'user', 'model', 'color', 'loc
  * The kinds of item: the Category column's dropdown. Same list as CATEGORIES in the app
  * (src/storage.js). Other text can still be typed into the column by hand.
  */
-const CATEGORIES_ = ['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', 'Other'];
+const CATEGORIES_ = [
+  'Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', // office
+  'Phone', 'Car charger', 'Fan', 'Dash cam', 'USB cable', // drivers
+  'Other',
+];
 
 /** How the item was added: app value <-> what the Method column shows. */
 const SOURCES_ = { camera: 'Camera', photo: 'Photo', manual: 'Typed' };
@@ -399,7 +404,23 @@ function itemsSheet_() {
     formatColumns_(sh, [{ key: f[0], col: col }], 2, Math.max(sh.getMaxRows() - 1, 1));
     sh.setColumnWidth(col, WIDTHS_[f[0]] || 120);
   });
+  refreshCategoryRule_(sh);
   return sh;
+}
+
+/**
+ * Brings the Category dropdown up to date once CATEGORIES_ has changed (say, new kinds of item
+ * were added), so an existing sheet offers them too. Runs once per change; the values already in
+ * the column are kept.
+ */
+function refreshCategoryRule_(sh) {
+  const props = PropertiesService.getScriptProperties();
+  const list = CATEGORIES_.join('\n');
+  if (props.getProperty(CONFIG.CATEGORIES_PROPERTY) === list) return;
+  const col = headerRow_(sh).indexOf('Category') + 1;
+  if (!col) return;
+  sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1).setDataValidation(categoryRule_());
+  props.setProperty(CONFIG.CATEGORIES_PROPERTY, list);
 }
 
 function writeHeaders_(sh, firstCol, fields) {

@@ -124,10 +124,19 @@ export function locationGroups(scans) {
 export const inLocation = (scans, key) => (key == null ? scans : scans.filter((s) => locationKey(s.location) === key))
 
 /**
- * The kinds of item, in the order the menus list them. The sheet's Category column offers the
- * same list (CATEGORIES in app-script/code.gs).
+ * The kinds of item, in two groups: what office staff use and what drivers carry. The menus show
+ * them under these headings, then Other.
  */
-export const CATEGORIES = ['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard', 'Other']
+export const CATEGORY_GROUPS = [
+  { label: 'Office', categories: ['Keyboard', 'Mouse', 'Monitor', 'RAM', 'Processor', 'Graphics card', 'Storage', 'Motherboard'] },
+  { label: 'Drivers', categories: ['Phone', 'Car charger', 'Fan', 'Dash cam', 'USB cable'] },
+]
+
+/**
+ * Every kind of item, in the order the menus list them. The sheet's Category column offers the
+ * same list (CATEGORIES_ in app-script/code.gs).
+ */
+export const CATEGORIES = [...CATEGORY_GROUPS.flatMap((g) => g.categories), 'Other']
 
 /**
  * A category in the list's spelling, so "ram" typed into the sheet is RAM. A category the list

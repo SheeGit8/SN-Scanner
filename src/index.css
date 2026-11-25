@@ -75,6 +75,17 @@
   --cat-graphics-card: #5f8f00;
   --cat-storage: #0a93b8;
   --cat-motherboard: #008300;
+  /*
+   * The driver categories reuse the office hues in the same order (13 hues would be too many to
+   * tell apart), starting at blue so the green Motherboard and the first one stay apart for
+   * color-blind readers in both themes. Their icons and names tell them from the office ones.
+   * These pick up the dark steps too, since .dark is on the same element as :root.
+   */
+  --cat-phone: var(--cat-monitor);
+  --cat-car-charger: var(--cat-ram);
+  --cat-fan: var(--cat-processor);
+  --cat-dash-cam: var(--cat-graphics-card);
+  --cat-usb-cable: var(--cat-storage);
   --cat-other: oklch(0.556 0 0);
 }
 
