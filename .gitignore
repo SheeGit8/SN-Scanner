@@ -29,4 +29,13 @@ dist-ssr
 
 .env.production
 
+# Playwright: local-only end-to-end scripts and their output
+e2e/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 
+# Screenshots
+screenshots/
+screenshot*.png
